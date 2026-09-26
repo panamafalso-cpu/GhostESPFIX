@@ -3,6 +3,8 @@ name: C5 STABLE - USB Serial-JTAG primary
 on:
   push:
     branches: [c5-usb-stable-v2]
+  pull_request:
+    branches: [Development-deki]
   workflow_dispatch:
 
 permissions:
