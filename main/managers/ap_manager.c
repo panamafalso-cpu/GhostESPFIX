@@ -1007,6 +1007,13 @@ esp_err_t ap_manager_init(void) {
         return ret;
     }
 
+    // Disable Wi-Fi power save immediately after AP start.
+    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (ps_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to disable WiFi power save after AP start: %s",
+                 esp_err_to_name(ps_err));
+    }
+
     glog("Wi-Fi Access Point started with SSID: %s\n", ssid);
 
     // Register event handlers for Wi-Fi events if not registered already
@@ -1038,8 +1045,6 @@ esp_err_t ap_manager_init(void) {
         return ret;
     }
     log_heap_status(TAG, "ap_init_post_httpd");
-
-    esp_wifi_set_ps(WIFI_PS_NONE);
 
     esp_netif_ip_info_t ip_info;
     if (esp_netif_get_ip_info(ap_netif, &ip_info) == ESP_OK) {
