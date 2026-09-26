@@ -2628,14 +2628,13 @@ void wifi_manager_init(void) {
     // Start Wi-Fi
     ESP_LOGI(TAG, "wifi_manager: starting WiFi (esp_wifi_start)...");
     ESP_ERROR_CHECK(esp_wifi_start());
-#if CONFIG_IDF_TARGET_ESP32P4
-    /* The C6 rejects this before Wi-Fi init (ESP_ERR_WIFI_NOT_INIT).
-     * Apply it after start, before the saved STA connection is requested. */
+/* Disable Wi-Fi power save after the driver has started.
+ * The earlier pre-start call can occur before Wi-Fi is initialized. */
     esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
     if (ps_err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to disable STA power save: %s", esp_err_to_name(ps_err));
+        ESP_LOGW(TAG, "Failed to disable WiFi power save after start: %s",
+                 esp_err_to_name(ps_err));
     }
-#endif
     ESP_LOGI(TAG, "wifi_manager: WiFi started, free internal RAM: %d bytes", 
               (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
      
