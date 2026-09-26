@@ -861,6 +861,11 @@ bool ap_manager_restore_after_attack(const char *who) {
 }
 
 esp_err_t ap_manager_init(void) {
+    // C5 diagnostic build: keep the Access Point completely disabled.
+    // This isolates whether starting GhostNet is what causes USB Serial/JTAG to disappear.
+    glog("Access point: DISABLED for C5 USB diagnostic test\n");
+    return ESP_OK;
+
     esp_err_t ret;
     wifi_mode_t mode;
 
