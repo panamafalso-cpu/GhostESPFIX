@@ -101,16 +101,7 @@ jobs:
           mode=get("CONFIG_ESPTOOLPY_FLASHMODE","dio")
           freq=get("CONFIG_ESPTOOLPY_FLASHFREQ","40m")
           size=get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB")
-          offset="0x0"
-          import subprocess
-          subprocess.run([
-              "python","-m","esptool","merge_bin",
-              "-o","artifacts/esp32c5-generic-v01/merged.bin",
-              "--flash-mode",mode,"--flash-freq",freq,"--flash-size",size,
-              offset,"artifacts/esp32c5-generic-v01/bootloader.bin",
-          ], check=True)
           PY
-          # Rebuild merged image using the partition/app offsets from the table.
           python3 - <<'PY'
           import pathlib, struct, subprocess, re
           t=pathlib.Path("artifacts/esp32c5-generic-v01/partitions.bin").read_bytes()
@@ -148,13 +139,10 @@ jobs:
           path: esp32c5-generic-v01-C5-USB-FIX.zip
 
       - name: Create GitHub Release
+        if: success()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="c5-usb-fix-v1-build-${{ github.run_number }}"
           TITLE="ESP32-C5 USB Fix v1 - Build ${{ github.run_number }}"
-          gh release create "$TAG" \
-            "esp32c5-generic-v01-C5-USB-FIX.zip" \
-            --repo "${{ github.repository }}" \
-            --title "$TITLE" \
-            --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch \`c5-usb-fix-v1\`. This build is not an official GhostESP release."
+          gh release create "$TAG"             "esp32c5-generic-v01-C5-USB-FIX.zip"             --repo "${{ github.repository }}"             --target "${{ github.sha }}"             --title "$TITLE"             --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch c5-usb-fix-v1. This build is not an official GhostESP release."
