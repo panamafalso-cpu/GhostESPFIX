@@ -92,17 +92,6 @@ jobs:
           cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-generic-v01/esp32c5-generic-v01.elf
           . ~/esp-idf/export.sh
           python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path("build/config/sdkconfig.h").read_text()
-          def get(name, default):
-              m = re.search(rf'^#define {name} "([^"]+)"', p, re.M)
-              return m.group(1) if m else default
-          mode=get("CONFIG_ESPTOOLPY_FLASHMODE","dio")
-          freq=get("CONFIG_ESPTOOLPY_FLASHFREQ","40m")
-          size=get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB")
-          PY
-          python3 - <<'PY'
           import pathlib, struct, subprocess, re
           t=pathlib.Path("artifacts/esp32c5-generic-v01/partitions.bin").read_bytes()
           fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
@@ -110,8 +99,7 @@ jobs:
           for pos in range(0,len(t)-sz+1,sz):
               magic,ptype,subtype,offset,size,label,flags=struct.unpack(fmt,t[pos:pos+sz])
               if magic != bytes((0xAA,0x50)): break
-              if ptype == 0:
-                  apps.append(offset)
+              if ptype == 0: apps.append(offset)
           if not apps: raise SystemExit("No app partition found")
           app=min(apps)
           p=pathlib.Path("build/config/sdkconfig.h").read_text()
@@ -145,4 +133,6 @@ jobs:
         run: |
           TAG="c5-usb-fix-v1-build-${{ github.run_number }}"
           TITLE="ESP32-C5 USB Fix v1 - Build ${{ github.run_number }}"
-          gh release create "$TAG"             "esp32c5-generic-v01-C5-USB-FIX.zip"             --repo "${{ github.repository }}"             --target "${{ github.sha }}"             --title "$TITLE"             --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch c5-usb-fix-v1. This build is not an official GhostESP release."
+          gh release create "$TAG" "esp32c5-generic-v01-C5-USB-FIX.zip"             --repo "${{ github.repository }}"             --target "${{ github.sha }}"             --title "$TITLE"             --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch c5-usb-fix-v1. This build is not an official GhostESP release."
+
+      # C5-only workflow: no other board targets are built.
