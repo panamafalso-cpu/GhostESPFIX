@@ -1,0 +1,101 @@
+name: C5 STABLE - USB Serial-JTAG primary
+
+on:
+  push:
+    branches: [c5-usb-stable-v2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: actions/cache@v4
+        id: cache-idf
+        with:
+          path: |
+            ~/esp-idf
+            ~/.espressif
+          key: esp-idf-v6.1-${{ runner.os }}-usb-primary-v2
+      - name: Install host dependencies
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget git flex bison gperf python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util
+      - name: Install ESP-IDF 6.1
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          git clone -b v6.1 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
+          ~/esp-idf/install.sh esp32c5
+      - name: Repair ESP-IDF Python environment
+        if: steps.cache-idf.outputs.cache-hit == 'true'
+        run: |
+          PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          VENV="$HOME/.espressif/python_env/idf6.1_py${PY_VER}_env"
+          if [ ! -x "$VENV/bin/python" ]; then
+            rm -rf "$VENV"
+            ~/esp-idf/install.sh esp32c5
+          fi
+      - name: Configure C5
+        run: |
+          rm -f sdkconfig sdkconfig.defaults
+          cp configs/sdkconfig.default.esp32c5 sdkconfig.defaults
+          cp configs/sdkconfig.default.esp32c5 sdkconfig
+          printf "\n# TEST: USB Serial-JTAG primary console - guarded driver\n" >> sdkconfig.defaults
+          printf "# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig.defaults
+          printf "# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig.defaults
+          printf "# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig
+          printf "# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig
+      - name: Build
+        env:
+          SDKCONFIG_DEFAULTS: sdkconfig.defaults
+        run: |
+          . ~/esp-idf/export.sh
+          export IDF_TARGET=esp32c5
+          export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+          idf.py clean
+          idf.py build
+      - name: Package
+        run: |
+          mkdir -p artifacts/esp32c5-usb-primary
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-primary/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-primary/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-primary/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-primary/esp32c5-usb-primary.elf
+          . ~/esp-idf/export.sh
+          python3 - <<'PY'
+          import pathlib, struct, subprocess, re
+          t=pathlib.Path("artifacts/esp32c5-usb-primary/partitions.bin").read_bytes()
+          fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
+          apps=[]
+          for pos in range(0,len(t)-sz+1,sz):
+              magic,ptype,subtype,offset,size,label,flags=struct.unpack(fmt,t[pos:pos+sz])
+              if magic != bytes((0xAA,0x50)): break
+              if ptype == 0: apps.append(offset)
+          if not apps: raise SystemExit("No app partition found")
+          p=pathlib.Path("build/config/sdkconfig.h").read_text()
+          def get(name, default):
+              m=re.search(rf'^#define {name} "([^"]+)"',p,re.M)
+              return m.group(1) if m else default
+          subprocess.run(["python","-m","esptool","--chip","esp32c5","merge-bin",
+              "-o","artifacts/esp32c5-usb-primary/merged.bin",
+              "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
+              "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
+              "--flash-size",get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB"),
+              "0x0","artifacts/esp32c5-usb-primary/bootloader.bin",
+              "0x8000","artifacts/esp32c5-usb-primary/partitions.bin",
+              hex(min(apps)),"artifacts/esp32c5-usb-primary/firmware.bin"],check=True)
+          PY
+          cd artifacts
+          zip -r ../esp32c5-usb-stable-v2.zip esp32c5-usb-primary
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32c5-usb-stable-v2
+          path: esp32c5-usb-primary-test.zip
