@@ -1,8 +1,8 @@
-name: Build ESP32-C5 USB fix
+name: Build ESP32-C5 no-AP diagnostic
 
 on:
   push:
-    branches: [c5-usb-fix-v1]
+    branches: [c5-usb-fix-v1, c5-no-ap-test]
   workflow_dispatch:
 
 permissions:
@@ -118,12 +118,12 @@ jobs:
           ],check=True)
           PY
           cd artifacts
-          zip -r ../esp32c5-generic-v01-C5-USB-FIX.zip esp32c5-generic-v01
+          zip -r ../esp32c5-generic-v01-C5-NO-AP.zip esp32c5-generic-v01
 
       - name: Upload C5 firmware
         uses: actions/upload-artifact@v4
         with:
-          name: esp32c5-generic-v01-C5-USB-FIX
+          name: esp32c5-generic-no-ap-v01-C5-USB-FIX
           path: esp32c5-generic-v01-C5-USB-FIX.zip
 
       - name: Create GitHub Release
@@ -131,8 +131,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="c5-usb-fix-v1-build-${{ github.run_number }}"
-          TITLE="ESP32-C5 USB Fix v1 - Build ${{ github.run_number }}"
-          gh release create "$TAG" "esp32c5-generic-v01-C5-USB-FIX.zip"             --repo "${{ github.repository }}"             --target "${{ github.sha }}"             --title "$TITLE"             --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch c5-usb-fix-v1. This build is not an official GhostESP release."
+          TAG="c5-no-ap-test-build-${{ github.run_number }}"
+          TITLE="ESP32-C5 No-AP Diagnostic - Build ${{ github.run_number }}"
+          gh release create "$TAG" "esp32c5-generic-v01-C5-USB-FIX.zip"             --repo "${{ github.repository }}"             --target "${{ github.sha }}"             --title "$TITLE"             --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch c5-no-ap-test. This build is not an official GhostESP release."
 
       # C5-only workflow: no other board targets are built.
