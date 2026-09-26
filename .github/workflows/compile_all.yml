@@ -30,6 +30,7 @@ permissions:
 
 jobs:
   build:
+    if: github.head_ref != 'c5-usb-fix-v1'
     name: Build for ${{ matrix.target.name }}
     runs-on: ubuntu-latest
 
@@ -452,6 +453,7 @@ jobs:
           path: ota_manifest_fragment/${{ matrix.target.board_key }}.json
 
   publish_ota_manifest:
+    if: github.head_ref != 'c5-usb-fix-v1'
     name: Publish OTA Manifest to R2
     needs: build
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
@@ -536,6 +538,7 @@ jobs:
             || { echo "Failed to upload ota-manifest.json to R2"; exit 1; }
 
   update_manifest_for_commit:
+    if: github.head_ref != 'c5-usb-fix-v1'
     name: Update Commit Manifest (push)
     needs: build
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
@@ -643,6 +646,7 @@ jobs:
       #     fi
 
   upload_prerelease:
+    if: github.head_ref != 'c5-usb-fix-v1'
     name: Create Pre-release and Upload Artifacts
     needs: build
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType == 'prerelease'
@@ -807,6 +811,7 @@ jobs:
           echo "Pre-release creation attempted."
 
   upload_release:
+    if: github.head_ref != 'c5-usb-fix-v1'
     name: Create Release and Upload Artifacts
     needs: build
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType == 'all'
