@@ -108,6 +108,7 @@ jobs:
               return m.group(1) if m else default
           subprocess.run([
               "python","-m","esptool","merge_bin",
+              "--chip","esp32c5",
               "-o","artifacts/esp32c5-generic-v01/merged.bin",
               "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
               "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
