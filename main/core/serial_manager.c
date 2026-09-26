@@ -989,12 +989,18 @@ void serial_manager_init() {
   }
 
 #if JTAG_SUPPORTED
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  // TEST: USB Serial/JTAG is the primary ESP-IDF console.
+  // ESP-IDF owns/initializes the USB console driver; do not install it a second time.
+  ESP_LOGI("SerialManager", "USB-JTAG primary console; using ESP-IDF console driver");
+#else
   usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
       .rx_buffer_size = BUF_SIZE,
       .tx_buffer_size = BUF_SIZE,
   };
-  usb_serial_jtag_driver_install(&usb_serial_jtag_config);
-  ESP_LOGI("SerialManager", "USB-JTAG installed: RX=%d TX=%d bytes", BUF_SIZE, BUF_SIZE);
+  esp_err_t usb_ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
+  ESP_LOGI("SerialManager", "USB-JTAG install: %s", esp_err_to_name(usb_ret));
+#endif
 #endif
 
   commandQueue = xQueueCreate(6, sizeof(SerialCommand));
