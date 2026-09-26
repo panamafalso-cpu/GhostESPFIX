@@ -1,8 +1,8 @@
 name: Build ESP32-C5 USB fix
 
 on:
-  pull_request:
-    branches: [Development-deki]
+  push:
+    branches: [c5-usb-fix-v1]
   workflow_dispatch:
 
 permissions:
