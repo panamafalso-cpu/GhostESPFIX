@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-c5:
@@ -49,49 +49,6 @@ jobs:
             rm -rf "$VENV"
             ~/esp-idf/install.sh
           fi
-
-      - name: Apply C5 USB/power-save test patch
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          wifi = Path("main/managers/wifi_manager.c")
-          s = wifi.read_text(encoding="utf-8")
-          old = """#if CONFIG_IDF_TARGET_ESP32P4
-    // Disable WiFi power save to improve responsiveness and reliability
-    esp_wifi_set_ps(WIFI_PS_NONE);
-#endif"""
-          new = """// Disable WiFi power save after the driver has started.
-// On ESP32-C5 the earlier pre-start call can occur before WiFi is initialized.
-    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
-    if (ps_err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to disable WiFi power save after start: %s",
-                 esp_err_to_name(ps_err));
-    }"""
-          if old not in s:
-              raise SystemExit("wifi_manager.c: expected post-start power-save block not found")
-          s = s.replace(old, new, 1)
-          wifi.write_text(s, encoding="utf-8")
-
-          ap = Path("main/managers/ap_manager.c")
-          s = ap.read_text(encoding="utf-8")
-          old = """    ESP_ERROR_CHECK(esp_wifi_start());
-
-    // Set WiFi power save mode to none to improve performance
-    esp_wifi_set_ps(WIFI_PS_NONE);"""
-          new = """    ESP_ERROR_CHECK(esp_wifi_start());
-
-    // Disable power save immediately after AP WiFi starts.
-    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
-    if (ps_err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to disable WiFi power save after AP start: %s",
-                 esp_err_to_name(ps_err));
-    }"""
-          if old not in s:
-              raise SystemExit("ap_manager.c: expected WiFi start block not found")
-          s = s.replace(old, new, 1)
-          ap.write_text(s, encoding="utf-8")
-          PY
 
       - name: Configure C5 build
         run: |
@@ -189,3 +146,15 @@ jobs:
         with:
           name: esp32c5-generic-v01-C5-USB-FIX
           path: esp32c5-generic-v01-C5-USB-FIX.zip
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="c5-usb-fix-v1-build-${{ github.run_number }}"
+          TITLE="ESP32-C5 USB Fix v1 - Build ${{ github.run_number }}"
+          gh release create "$TAG" \
+            "esp32c5-generic-v01-C5-USB-FIX.zip" \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch \`c5-usb-fix-v1\`. This build is not an official GhostESP release."
