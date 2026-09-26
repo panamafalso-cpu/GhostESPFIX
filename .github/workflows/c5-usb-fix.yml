@@ -123,16 +123,7 @@ jobs:
       - name: Upload C5 firmware
         uses: actions/upload-artifact@v4
         with:
-          name: esp32c5-generic-no-ap-v01-C5-USB-FIX
-          path: esp32c5-generic-v01-C5-USB-FIX.zip
+          name: esp32c5-generic-no-ap-v01
+          path: esp32c5-generic-v01-C5-NO-AP.zip
 
-      - name: Create GitHub Release
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="c5-no-ap-test-build-${{ github.run_number }}"
-          TITLE="ESP32-C5 No-AP Diagnostic - Build ${{ github.run_number }}"
-          gh release create "$TAG" "esp32c5-generic-v01-C5-USB-FIX.zip"             --repo "${{ github.repository }}"             --target "${{ github.sha }}"             --title "$TITLE"             --notes "Experimental ESP32-C5 USB Serial-JTAG stability test build. Built automatically from branch c5-no-ap-test. This build is not an official GhostESP release."
-
-      # C5-only workflow: no other board targets are built.
+      # Release creation intentionally omitted: the diagnostic ZIP is provided as a workflow artifact.\n
