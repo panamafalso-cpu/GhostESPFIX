@@ -2,9 +2,7 @@
 #include "core/system_manager.h"
 #include "driver/uart.h"
 #include "core/glog.h"
-#if !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include "driver/usb_serial_jtag.h"
-#endif
 #include "esp_task_wdt.h"
 #include "esp_log.h"
 #include "esp_attr.h"
@@ -31,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
     defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #define JTAG_SUPPORTED 1
@@ -56,18 +55,6 @@
 
 #if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
 static StackType_t *s_serial_task_stack = NULL;
-static StaticTask_t *s_serial_task_buffer = NULL;
-#endif
-
-#ifndef CONFIG_CONSOLE_UART_BAUDRATE
-#ifdef CONFIG_MONITOR_BAUD
-#define CONFIG_CONSOLE_UART_BAUDRATE CONFIG_MONITOR_BAUD
-#else
-#define CONFIG_CONSOLE_UART_BAUDRATE 115200
-#endif
-#endif
-
-
 static StaticTask_t *s_serial_task_buffer = NULL;
 #endif
 
