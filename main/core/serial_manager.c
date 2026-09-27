@@ -42,8 +42,8 @@
 #define UART_NUM UART_NUM_1
 #endif
 #define BUF_SIZE (512)
-#define SERIAL_USB_READ_BYTES(buf, len, ticks) (usb_serial_jtag_is_driver_installed() ? usb_serial_jtag_read_bytes((buf), (len), (ticks)) : 0)nstalled() ? SERIAL_USB_READ_BYTES((buf), (len), (ticks)) : 0)
-#define SERIAL_USB_WRITE_BYTES(buf, len, ticks) (usb_serial_jtag_is_driver_installed() ? usb_serial_jtag_write_bytes((buf), (len), (ticks)) : 0)nstalled() ? SERIAL_USB_WRITE_BYTES((buf), (len), (ticks)) : 0)
+#define SERIAL_USB_READ_BYTES(buf, len, ticks) (usb_serial_jtag_is_driver_installed() ? usb_serial_jtag_read_bytes((buf), (len), (ticks)) : 0)
+#define SERIAL_USB_WRITE_BYTES(buf, len, ticks) (usb_serial_jtag_is_driver_installed() ? usb_serial_jtag_write_bytes((buf), (len), (ticks)) : 0)
 #define SERIAL_BUFFER_SIZE 512
 #define SERIAL_TASK_STACK_SIZE_INTERNAL 8192
 #define SERIAL_TASK_STACK_SIZE_PSRAM 8192
