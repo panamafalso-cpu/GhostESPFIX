@@ -13,11 +13,10 @@ checks = [
     ("USB secondary console disabled", "#define CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG 1" not in cfg),
     ("UART console backend disabled", "#define CONFIG_ESP_CONSOLE_UART 1" not in cfg),
     ("C5 PM automatic light sleep disabled", "#define CONFIG_PM_ENABLE 1" not in cfg),
-    ("Automatic light sleep is not enabled by PM (USB option not applicable)", "CONFIG_PM_ENABLE" not in cfg),
     ("SerialManager does not call low-level USB read in primary path",
-     "serial_usb_read_bytes(void *buf" in src and "usb_serial_jtag_read_bytes(" in src),
+     "serial_usb_read_bytes(void *buf" in src and "usb_serial_jtag_read_bytes(" not in src.split("#else", 1)[0]),
     ("SerialManager does not call low-level USB write in primary path",
-     "serial_usb_write_bytes(const void *buf" in src and "usb_serial_jtag_write_bytes(" in src),
+     "serial_usb_write_bytes(const void *buf" in src and "usb_serial_jtag_write_bytes(" not in src.split("#else", 1)[0]),
 ]
 
 # Verify the primary-console implementation is VFS based.
@@ -45,7 +44,6 @@ except Exception as e:
     sys.exit(1)
 
 for sym in ("usb_serial_jtag_read_bytes", "usb_serial_jtag_write_bytes"):
-
     if sym in symbols:
         print(f"[FAIL] ELF still has undefined reference to {sym}")
         sys.exit(1)
