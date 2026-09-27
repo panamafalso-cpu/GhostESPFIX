@@ -2,7 +2,7 @@ name: C5 TEST - USB Serial-JTAG primary
 
 on:
   push:
-    branches: [c5-usb-v3-vfs]
+    branches: [c5-usb-v4-definitive]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v6.1-${{ runner.os }}-usb-v3-vfs-v1
+          key: esp-idf-v6.1-${{ runner.os }}-usb-v4-definitive-v1
       - name: Install host dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
@@ -71,15 +71,15 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p artifacts/esp32c5-usb-v3-vfs
-          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-v3-vfs/partitions.bin
-          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-v3-vfs/bootloader.bin
-          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-v3-vfs/firmware.bin
-          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-v3-vfs/esp32c5-usb-v3-vfs.elf
+          mkdir -p artifacts/esp32c5-usb-v4-definitive
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-v4-definitive/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-v4-definitive/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-v4-definitive/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-v4-definitive/esp32c5-usb-v4-definitive.elf
           . ~/esp-idf/export.sh
           python3 - <<'PY'
           import pathlib, struct, subprocess, re
-          t=pathlib.Path("artifacts/esp32c5-usb-v3-vfs/partitions.bin").read_bytes()
+          t=pathlib.Path("artifacts/esp32c5-usb-v4-definitive/partitions.bin").read_bytes()
           fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
           apps=[]
           for pos in range(0,len(t)-sz+1,sz):
@@ -92,18 +92,18 @@ jobs:
               m=re.search(rf'^#define {name} "([^"]+)"',p,re.M)
               return m.group(1) if m else default
           subprocess.run(["python","-m","esptool","--chip","esp32c5","merge-bin",
-              "-o","artifacts/esp32c5-usb-v3-vfs/merged.bin",
+              "-o","artifacts/esp32c5-usb-v4-definitive/merged.bin",
               "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
               "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
               "--flash-size",get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB"),
-              "0x0","artifacts/esp32c5-usb-v3-vfs/bootloader.bin",
-              "0x8000","artifacts/esp32c5-usb-v3-vfs/partitions.bin",
-              hex(min(apps)),"artifacts/esp32c5-usb-v3-vfs/firmware.bin"],check=True)
+              "0x0","artifacts/esp32c5-usb-v4-definitive/bootloader.bin",
+              "0x8000","artifacts/esp32c5-usb-v4-definitive/partitions.bin",
+              hex(min(apps)),"artifacts/esp32c5-usb-v4-definitive/firmware.bin"],check=True)
           PY
           cd artifacts
-          zip -r ../esp32c5-usb-v3-vfs.zip esp32c5-usb-v3-vfs
+          zip -r ../esp32c5-usb-v4-definitive.zip esp32c5-usb-v4-definitive
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: esp32c5-usb-v3-vfs
-          path: esp32c5-usb-v3-vfs.zip
+          name: esp32c5-usb-v4-definitive
+          path: esp32c5-usb-v4-definitive.zip
