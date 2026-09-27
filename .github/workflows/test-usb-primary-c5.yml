@@ -2,7 +2,7 @@ name: C5 TEST - USB Serial-JTAG primary
 
 on:
   push:
-    branches: [c5-usb-v3-vfs]
+    branches: [c5-usb-v4-driver-vfs]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v6.1-${{ runner.os }}-usb-v3-vfs-v1
+          key: esp-idf-v6.1-${{ runner.os }}-usb-v4-driver-vfs-v1
       - name: Install host dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
@@ -71,7 +71,7 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p artifacts/esp32c5-usb-v3-vfs
+          mkdir -p artifacts/esp32c5-usb-v4-driver-vfs
           cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-v3-vfs/partitions.bin
           cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-v3-vfs/bootloader.bin
           cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-v3-vfs/firmware.bin
@@ -101,7 +101,7 @@ jobs:
               hex(min(apps)),"artifacts/esp32c5-usb-v3-vfs/firmware.bin"],check=True)
           PY
           cd artifacts
-          zip -r ../esp32c5-usb-v3-vfs.zip esp32c5-usb-v3-vfs
+          zip -r ../esp32c5-usb-v4-driver-vfs.zip esp32c5-usb-v3-vfs
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
