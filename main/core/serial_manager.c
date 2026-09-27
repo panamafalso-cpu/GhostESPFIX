@@ -75,7 +75,7 @@ int serial_manager_write_bytes(const void *data, size_t len) {
   int written = 0;
 
   if (!s_uart_disabled && !s_uart_paused) {
-    written = uart_write_bytes(UART_NUM, (const char *)data, (size_t)len);
+    written = serial_uart_write_bytes(UART_NUM, (const char *)data, (size_t)len);
   }
 
 #if JTAG_SUPPORTED
