@@ -2,7 +2,7 @@ name: C5 TEST - USB Serial-JTAG primary
 
 on:
   push:
-    branches: [test-usb-primary-c5]
+    branches: [test-usb-primary-c5, c5-usb-direct-stable]
   workflow_dispatch:
 
 permissions:
@@ -63,15 +63,15 @@ jobs:
           idf.py build
       - name: Package
         run: |
-          mkdir -p artifacts/esp32c5-usb-primary
-          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-primary/partitions.bin
-          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-primary/bootloader.bin
-          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-primary/firmware.bin
-          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-primary/esp32c5-usb-primary.elf
+          mkdir -p artifacts/esp32c5-usb-direct-stable
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-direct-stable/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-direct-stable/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-direct-stable/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-direct-stable/esp32c5-usb-direct-stable.elf
           . ~/esp-idf/export.sh
           python3 - <<'PY'
           import pathlib, struct, subprocess, re
-          t=pathlib.Path("artifacts/esp32c5-usb-primary/partitions.bin").read_bytes()
+          t=pathlib.Path("artifacts/esp32c5-usb-direct-stable/partitions.bin").read_bytes()
           fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
           apps=[]
           for pos in range(0,len(t)-sz+1,sz):
@@ -84,18 +84,18 @@ jobs:
               m=re.search(rf'^#define {name} "([^"]+)"',p,re.M)
               return m.group(1) if m else default
           subprocess.run(["python","-m","esptool","--chip","esp32c5","merge-bin",
-              "-o","artifacts/esp32c5-usb-primary/merged.bin",
+              "-o","artifacts/esp32c5-usb-direct-stable/merged.bin",
               "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
               "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
               "--flash-size",get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB"),
-              "0x0","artifacts/esp32c5-usb-primary/bootloader.bin",
-              "0x8000","artifacts/esp32c5-usb-primary/partitions.bin",
-              hex(min(apps)),"artifacts/esp32c5-usb-primary/firmware.bin"],check=True)
+              "0x0","artifacts/esp32c5-usb-direct-stable/bootloader.bin",
+              "0x8000","artifacts/esp32c5-usb-direct-stable/partitions.bin",
+              hex(min(apps)),"artifacts/esp32c5-usb-direct-stable/firmware.bin"],check=True)
           PY
           cd artifacts
-          zip -r ../esp32c5-usb-primary-test.zip esp32c5-usb-primary
+          zip -r ../esp32c5-usb-direct-stable-test.zip esp32c5-usb-direct-stable
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: esp32c5-usb-primary-test
-          path: esp32c5-usb-primary-test.zip
+          name: esp32c5-usb-direct-stable-test
+          path: esp32c5-usb-direct-stable-test.zip
