@@ -68,6 +68,23 @@ static StaticTask_t *s_serial_task_buffer = NULL;
 #endif
 
 
+static StaticTask_t *s_serial_task_buffer = NULL;
+#endif
+
+#ifndef CONFIG_CONSOLE_UART_BAUDRATE
+#ifdef CONFIG_MONITOR_BAUD
+#define CONFIG_CONSOLE_UART_BAUDRATE CONFIG_MONITOR_BAUD
+#else
+#define CONFIG_CONSOLE_UART_BAUDRATE 115200
+#endif
+#endif
+
+EXT_RAM_BSS_ATTR static char serial_buffer[SERIAL_BUFFER_SIZE];
+static TaskHandle_t s_serial_task_handle = NULL;
+static bool s_serial_initialized = false;
+static bool s_uart_disabled = false; // disable main serial UART for certain templates
+static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
+
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include <unistd.h>
 #include <sys/select.h>
