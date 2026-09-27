@@ -2,7 +2,7 @@ name: C5 TEST - USB Serial-JTAG primary
 
 on:
   push:
-    branches: [c5-usb-v3-vfs]
+    branches: [c5-usb-v4-final]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v6.1-${{ runner.os }}-usb-v3-vfs-v1
+          key: esp-idf-v6.1-${{ runner.os }}-usb-v4-final-v1
       - name: Install host dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
@@ -61,17 +61,33 @@ jobs:
           export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
           idf.py clean
           idf.py build
-      - name: Deep C5 USB static and ELF validation
+      - name: Deep C5 USB v4 static and ELF validation
         run: |
           . ~/esp-idf/export.sh
           export IDF_TARGET=esp32c5
           python3 tools/ci/check_c5_usb.py
           idf.py size
           idf.py size-components
+          sha256sum build/Ghost_ESP_IDF.bin > /tmp/c5-v4-build1.sha256
+
+      - name: Clean rebuild reproducibility test
+        run: |
+          . ~/esp-idf/export.sh
+          export IDF_TARGET=esp32c5
+          idf.py fullclean
+          idf.py build
+          python3 tools/ci/check_c5_usb.py
+          idf.py size
+          idf.py size-components
+          sha256sum build/Ghost_ESP_IDF.bin > /tmp/c5-v4-build2.sha256
+          echo "Build hashes:"
+          cat /tmp/c5-v4-build1.sha256
+          cat /tmp/c5-v4-build2.sha256
+          test "$(cut -d' ' -f1 /tmp/c5-v4-build1.sha256)" = "$(cut -d' ' -f1 /tmp/c5-v4-build2.sha256)"
 
       - name: Package
         run: |
-          mkdir -p artifacts/esp32c5-usb-v3-vfs
+          mkdir -p artifacts/esp32c5-usb-v4-final
           cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-v3-vfs/partitions.bin
           cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-v3-vfs/bootloader.bin
           cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-v3-vfs/firmware.bin
@@ -101,7 +117,7 @@ jobs:
               hex(min(apps)),"artifacts/esp32c5-usb-v3-vfs/firmware.bin"],check=True)
           PY
           cd artifacts
-          zip -r ../esp32c5-usb-v3-vfs.zip esp32c5-usb-v3-vfs
+          zip -r ../esp32c5-usb-v4-final.zip esp32c5-usb-v3-vfs
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
