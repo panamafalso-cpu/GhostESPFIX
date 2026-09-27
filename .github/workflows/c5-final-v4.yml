@@ -1,0 +1,141 @@
+name: C5 FINAL v4 - USB Serial-JTAG stable
+
+on:
+  push:
+    branches:
+      - c5-usb-final-v4
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: actions/cache@v4
+        id: cache-idf
+        with:
+          path: |
+            ~/esp-idf
+            ~/.espressif
+          key: esp-idf-v6.1-${{ runner.os }}-usb-final-v4
+
+      - name: Install host dependencies
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget git flex bison gperf python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util
+
+      - name: Install ESP-IDF 6.1
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          git clone -b v6.1 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
+          ~/esp-idf/install.sh esp32c5
+
+      - name: Repair ESP-IDF Python environment
+        if: steps.cache-idf.outputs.cache-hit == 'true'
+        run: |
+          PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          VENV="$HOME/.espressif/python_env/idf6.1_py${PY_VER}_env"
+          if [ ! -x "$VENV/bin/python" ]; then
+            rm -rf "$VENV"
+            ~/esp-idf/install.sh esp32c5
+          fi
+
+      - name: Configure C5
+        run: |
+          rm -f sdkconfig sdkconfig.defaults
+          cp configs/sdkconfig.default.esp32c5 sdkconfig.defaults
+          cp configs/sdkconfig.default.esp32c5 sdkconfig
+          printf "\n# C5 FINAL v4 USB Serial-JTAG primary console\n" >> sdkconfig.defaults
+          printf "# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig.defaults
+          printf "# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig.defaults
+          printf "# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig
+          printf "# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig
+
+      - name: Rigorous source validation
+        run: |
+          set -euo pipefail
+          cfg=configs/sdkconfig.default.esp32c5
+          src=main/core/serial_manager.c
+          grep -q '^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y$' "$cfg"
+          grep -q '^CONFIG_ESP_CONSOLE_SECONDARY_NONE=y$' "$cfg"
+          ! grep -q '^CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y$' "$cfg"
+          grep -q 'static bool serial_usb_driver_ready' "$src"
+          grep -q 'serial_usb_wait_for_driver' "$src"
+          ! grep -q '#include <unistd.h>' "$src"
+          test "$(grep -c 'usb_serial_jtag_read_bytes(' "$src")" -eq 1
+          test "$(grep -c 'usb_serial_jtag_write_bytes(' "$src")" -eq 1
+          grep -q '#if JTAG_SUPPORTED && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)' "$src"
+
+      - name: Build
+        env:
+          SDKCONFIG_DEFAULTS: sdkconfig.defaults
+        run: |
+          . ~/esp-idf/export.sh
+          export IDF_TARGET=esp32c5
+          export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+          idf.py clean
+          idf.py build
+          idf.py size
+          idf.py size-components
+
+      - name: Validate application headroom and package
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, re
+          csv = pathlib.Path("build/partition_table/partition-table.csv")
+          app = pathlib.Path("build/Ghost_ESP_IDF.bin")
+          sizes = []
+          for line in csv.read_text().splitlines():
+              line = line.split("#", 1)[0].strip()
+              if not line:
+                  continue
+              f = [x.strip() for x in line.split(",")]
+              if len(f) >= 5 and f[1] == "app" and f[4]:
+                  sizes.append(int(f[4], 0))
+          if not sizes:
+              raise SystemExit("No application partition found")
+          slot = min(sizes)
+          image = app.stat().st_size
+          free = slot - image
+          pct = free * 100.0 / slot
+          print(f"C5 app slot: {slot} bytes")
+          print(f"C5 firmware: {image} bytes")
+          print(f"C5 headroom: {free} bytes ({pct:.2f}%)")
+          if free <= 0:
+              raise SystemExit("Firmware does not fit application partition")
+          if pct < 2:
+              raise SystemExit("Application partition headroom below 2%")
+          if pct < 5:
+              print("WARNING: application headroom below 5%")
+          PY
+
+          mkdir -p artifacts/esp32c5-usb-final-v4
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-final-v4/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-final-v4/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-final-v4/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-final-v4/esp32c5-usb-final-v4.elf
+
+          . ~/esp-idf/export.sh
+          python -m esptool --chip esp32c5 image-info artifacts/esp32c5-usb-final-v4/bootloader.bin
+          python -m esptool --chip esp32c5 image-info artifacts/esp32c5-usb-final-v4/firmware.bin
+
+          python -m esptool --chip esp32c5 merge-bin             -o artifacts/esp32c5-usb-final-v4/merged.bin             --flash-mode dio             --flash-size 4MB             0x0 artifacts/esp32c5-usb-final-v4/bootloader.bin             0x8000 artifacts/esp32c5-usb-final-v4/partitions.bin             0x10000 artifacts/esp32c5-usb-final-v4/firmware.bin
+
+          python -m esptool --chip esp32c5 image-info artifacts/esp32c5-usb-final-v4/merged.bin || true
+          (cd artifacts && zip -9 ../esp32c5-usb-final-v4.zip esp32c5-usb-final-v4/*)
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32c5-usb-final-v4
+          path: esp32c5-usb-final-v4.zip
