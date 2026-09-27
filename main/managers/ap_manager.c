@@ -1016,14 +1016,8 @@ esp_err_t ap_manager_init(void) {
     ESP_ERROR_CHECK(
         esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
 
-    // Initialize mDNS
-    ret = setup_mdns();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to setup mDNS");
-        return ret;
-    }
-
-    // Start HTTP server
+    // Start the HTTP server before mDNS. Direct access at 192.168.4.1
+    // must not wait for name-service discovery to initialize.
     ret = load_server_config();
     if (ret != ESP_OK) {
         glog("Error loading server config\n");
@@ -1038,6 +1032,14 @@ esp_err_t ap_manager_init(void) {
         return ret;
     }
     log_heap_status(TAG, "ap_init_post_httpd");
+
+    // mDNS is optional for the WebUI. Keep direct 192.168.4.1 access
+    // available even if mDNS initialization is slow or fails.
+    ret = setup_mdns();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS setup failed; WebUI remains available at 192.168.4.1: %s",
+                 esp_err_to_name(ret));
+    }
 
     esp_wifi_set_ps(WIFI_PS_NONE);
 
@@ -1141,14 +1143,7 @@ esp_err_t ap_manager_start_services() {
         return ESP_OK;
     }
 
-    if (mdns_freed) {
-        ret = setup_mdns();
-        if (ret != ESP_OK) {
-            return ret;
-        }
-    }
-
-    // Start HTTPD server
+    // HTTP is the primary WebUI service. Do not make it wait on mDNS.
     if (config_loaded) {
         reset_server_config();
     }
@@ -1163,6 +1158,14 @@ esp_err_t ap_manager_start_services() {
         glog("Error starting HTTP server\n");
         status_display_show_status("AP HTTP Fail");
         return ret;
+    }
+
+    if (mdns_freed) {
+        ret = setup_mdns();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "mDNS setup failed; direct WebUI remains available: %s",
+                     esp_err_to_name(ret));
+        }
     }
 
     status_display_show_status("AP Services On");
@@ -2048,6 +2051,10 @@ static esp_err_t load_server_config(void) {
     server_config.stack_size = 6144;
     server_config.recv_wait_timeout = 10;
     server_config.send_wait_timeout = 10;
+    // WebUI tuning for C5: allow browser sessions to be reused while
+    // stale sockets can be purged when the phone opens several requests.
+    server_config.lru_purge_enable = true;
+    server_config.keep_alive_enable = true;
 
     handler_count = 0;
 
