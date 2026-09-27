@@ -31,6 +31,43 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
+    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+#define JTAG_SUPPORTED 1
+#else
+#define JTAG_SUPPORTED 0
+#endif
+#ifndef CONFIG_USE_TDECK
+#define UART_NUM UART_NUM_0
+#else
+#define UART_NUM UART_NUM_1
+#endif
+#define BUF_SIZE (512)
+#define SERIAL_BUFFER_SIZE 512
+#define SERIAL_TASK_STACK_SIZE_INTERNAL 8192
+#define SERIAL_TASK_STACK_SIZE_PSRAM 8192
+#define SERIAL_TASK_USE_PSRAM_STACK 0
+
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
+#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
+#else
+#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_INTERNAL
+#endif
+
+#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
+static StackType_t *s_serial_task_stack = NULL;
+static StaticTask_t *s_serial_task_buffer = NULL;
+#endif
+
+#ifndef CONFIG_CONSOLE_UART_BAUDRATE
+#ifdef CONFIG_MONITOR_BAUD
+#define CONFIG_CONSOLE_UART_BAUDRATE CONFIG_MONITOR_BAUD
+#else
+#define CONFIG_CONSOLE_UART_BAUDRATE 115200
+#endif
+#endif
+
+
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include <unistd.h>
 #include <sys/select.h>
