@@ -757,7 +757,7 @@ void serial_task(void *pvParameter) {
 #if JTAG_SUPPORTED
     if (length <= 0) {
       length =
-          usb_serial_jtag_read_bytes(data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
+          serial_usb_read_bytes(data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
       if (length > 0) read_source = 1;
     }
 #endif
