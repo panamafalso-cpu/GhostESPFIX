@@ -31,7 +31,9 @@
 #include <string.h>
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include <unistd.h>
-#include <sys/select.h>
+#include <fcntl.h>
+#include <errno.h>
+#include "driver/usb_serial_jtag_vfs.h"
 #endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
@@ -75,20 +77,14 @@ static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
 static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+static bool s_usb_driver_owned = false;
+#endif
 
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
+  (void)ticks_to_wait;
   if (buf == NULL || len == 0) return 0;
-  fd_set readfds;
-  FD_ZERO(&readfds);
-  FD_SET(STDIN_FILENO, &readfds);
-  struct timeval tv = {
-    .tv_sec = ticks_to_wait / configTICK_RATE_HZ,
-    .tv_usec = (suseconds_t)(((ticks_to_wait % configTICK_RATE_HZ) * 1000000ULL) /
-                              configTICK_RATE_HZ),
-  };
-  int ret = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
-  if (ret <= 0 || !FD_ISSET(STDIN_FILENO, &readfds)) return 0;
   ssize_t n = read(STDIN_FILENO, buf, len);
   return n > 0 ? (int)n : 0;
 }
@@ -1027,9 +1023,28 @@ void serial_manager_init() {
 
 #if JTAG_SUPPORTED
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
-  // TEST: USB Serial/JTAG is the primary ESP-IDF console.
-  // ESP-IDF owns/initializes the USB console driver; do not install it a second time.
-  ESP_LOGI("SerialManager", "USB-JTAG primary console; using ESP-IDF console driver");
+  if (!usb_serial_jtag_is_driver_installed()) {
+    usb_serial_jtag_driver_config_t config = {
+        .rx_buffer_size = BUF_SIZE,
+        .tx_buffer_size = BUF_SIZE,
+    };
+    esp_err_t ret = usb_serial_jtag_driver_install(&config);
+    ESP_LOGI("SerialManager", "USB-JTAG primary install: %s", esp_err_to_name(ret));
+    if (ret == ESP_OK) s_usb_driver_owned = true;
+  } else {
+    ESP_LOGI("SerialManager", "USB-JTAG primary driver already installed");
+  }
+
+  if (usb_serial_jtag_is_driver_installed()) {
+    usb_serial_jtag_vfs_use_driver();
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (flags >= 0) fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+    flags = fcntl(STDOUT_FILENO, F_GETFL, 0);
+    if (flags >= 0) fcntl(STDOUT_FILENO, F_SETFL, flags | O_NONBLOCK);
+    ESP_LOGI("SerialManager", "USB-JTAG primary VFS bound to driver");
+  } else {
+    ESP_LOGE("SerialManager", "USB-JTAG primary driver unavailable");
+  }
 #else
   usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
       .rx_buffer_size = BUF_SIZE,
@@ -1095,18 +1110,21 @@ void serial_manager_init() {
 }
 
 void serial_manager_deinit() {
-  if (!s_serial_initialized) {
-    return;
-  }
+  if (!s_serial_initialized) return;
   if (s_serial_task_handle) {
     vTaskDelete(s_serial_task_handle);
     s_serial_task_handle = NULL;
   }
-#if JTAG_SUPPORTED && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+#if JTAG_SUPPORTED && defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  if (s_usb_driver_owned && usb_serial_jtag_is_driver_installed()) {
+    usb_serial_jtag_vfs_use_nonblocking();
+    usb_serial_jtag_driver_uninstall();
+    s_usb_driver_owned = false;
+  }
+#elif JTAG_SUPPORTED
   usb_serial_jtag_driver_uninstall();
 #endif
   uart_driver_delete(UART_NUM);
-
   if (commandQueue) {
     vQueueDelete(commandQueue);
     commandQueue = NULL;
@@ -1116,193 +1134,31 @@ void serial_manager_deinit() {
 
 void serial_manager_restore_console(void) {
 #if JTAG_SUPPORTED
-  if (!s_serial_initialized) {
-    return;
-  }
+  if (!s_serial_initialized) return;
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
-  ESP_LOGI("SerialManager", "USB-JTAG primary console owned by ESP-IDF; restore skipped");
-  return;
+  if (!usb_serial_jtag_is_driver_installed()) {
+    usb_serial_jtag_driver_config_t config = {
+        .rx_buffer_size = BUF_SIZE,
+        .tx_buffer_size = BUF_SIZE,
+    };
+    esp_err_t ret = usb_serial_jtag_driver_install(&config);
+    ESP_LOGI("SerialManager", "USB-JTAG restore install: %s", esp_err_to_name(ret));
+    if (ret == ESP_OK) s_usb_driver_owned = true;
+  }
+  if (usb_serial_jtag_is_driver_installed()) {
+    usb_serial_jtag_vfs_use_driver();
+    ESP_LOGI("SerialManager", "USB-JTAG primary VFS restored");
+  } else {
+    ESP_LOGW("SerialManager", "USB-JTAG restore failed: driver unavailable");
+  }
 #else
-  usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
+  usb_serial_jtag_driver_config_t config = {
       .rx_buffer_size = BUF_SIZE,
       .tx_buffer_size = BUF_SIZE,
   };
-  /* TinyUSB disconnect is asynchronous on the S3. Retry briefly so the
-   * console driver does not lose the race for the USB peripheral when a HID
-   * view is closed. Return immediately after the first successful install to
-   * avoid treating an already-restored driver as an error. */
-  esp_err_t ret = ESP_FAIL;
-  for (int attempt = 0; attempt < 5; attempt++) {
-    ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
-    if (ret == ESP_OK) {
-      ESP_LOGI("SerialManager", "USB-JTAG restored after BadUSB teardown");
-      return;
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-  ESP_LOGW("SerialManager",
-           "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
-           esp_err_to_name(ret));
+  esp_err_t ret = usb_serial_jtag_driver_install(&config);
+  ESP_LOGI("SerialManager", "USB-JTAG restore: %s", esp_err_to_name(ret));
 #endif
 #endif
 }
 
-int serial_manager_get_uart_num() {
-    return (int)UART_NUM;
-}
-
-bool serial_manager_release_uart(int uart_num) {
-  if (uart_num != (int)UART_NUM) {
-    return false;
-  }
-  if (s_uart_disabled || s_uart_paused || !s_serial_initialized) {
-    return false;
-  }
-  // Stop the serial task from touching the UART, then wait long enough for any
-  // in-flight uart_read_bytes() (10 ms timeout) to return before deleting the
-  // driver. USB-JTAG console input continues uninterrupted.
-  s_uart_paused = true;
-  vTaskDelay(pdMS_TO_TICKS(30));
-  uart_driver_delete(UART_NUM);
-  ESP_LOGI("SerialManager", "UART%d released for external owner", (int)UART_NUM);
-  return true;
-}
-
-void serial_manager_reacquire_uart(void) {
-  if (!s_uart_paused) {
-    return;
-  }
-  const uart_config_t uart_config = {
-      .baud_rate = CONFIG_CONSOLE_UART_BAUDRATE,
-      .data_bits = UART_DATA_8_BITS,
-      .parity = UART_PARITY_DISABLE,
-      .stop_bits = UART_STOP_BITS_1,
-      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-  };
-  uart_param_config(UART_NUM, &uart_config);
-  esp_err_t err = uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
-  if (err != ESP_OK) {
-    ESP_LOGW("SerialManager", "UART%d reacquire failed: %s", (int)UART_NUM,
-             esp_err_to_name(err));
-    return;
-  }
-  s_uart_paused = false;
-  ESP_LOGI("SerialManager", "UART%d reacquired", (int)UART_NUM);
-}
-
-int handle_serial_command(const char *input) {
-  // Handle peer commands with logging and proper remote flag management
-  if (strncmp(input, "peer:", 5) == 0) {
-    static int peer_depth = 0;
-    if (peer_depth >= 4) {
-      glog("peer: command nesting too deep\n");
-      return ESP_FAIL;
-    }
-    const char* actual_command = input + 5;
-    esp_comm_manager_set_remote_command_flag(true);
-    bool quiet_badusb_setting =
-        strncmp(actual_command, "badusb set_", 11) == 0 ||
-        strncmp(actual_command, "badusb exec ", 12) == 0 ||
-        strcmp(actual_command, "badusb keyboard_start") == 0 ||
-        strcmp(actual_command, "badusb keyboard_stop") == 0 ||
-        strcmp(actual_command, "badusb jiggle_start") == 0 ||
-        strcmp(actual_command, "badusb jiggle_stop") == 0 ||
-        strncmp(actual_command, "badusb trackpad_move ", 21) == 0 ||
-        strncmp(actual_command, "badusb trackpad_button ", 23) == 0 ||
-        strncmp(actual_command, "badusb trackpad_wheel ", 22) == 0 ||
-        strcmp(actual_command, "badusb trackpad_start") == 0 ||
-        strcmp(actual_command, "badusb trackpad_stop") == 0 ||
-        strcmp(actual_command, "badusb stop") == 0;
-    if (!quiet_badusb_setting) {
-      glog("Peer command: %s\n", actual_command);
-    }
-    if (handle_peer_badusb_trackpad_fast(actual_command)) {
-      esp_comm_manager_set_remote_command_flag(false);
-      return ESP_OK;
-    }
-    peer_depth++;
-    int result = handle_serial_command(actual_command);
-    peer_depth--;
-    esp_comm_manager_set_remote_command_flag(false);
-    return result;
-  }
-  
-  char expanded_input[SERIAL_BUFFER_SIZE];
-  shell_expand_command(input, expanded_input, sizeof(expanded_input));
-  char input_copy[SERIAL_BUFFER_SIZE];
-  size_t input_len = strlen(expanded_input);
-  if (input_len >= sizeof(input_copy)) {
-    input_len = sizeof(input_copy) - 1;
-  }
-  memcpy(input_copy, expanded_input, input_len);
-  input_copy[input_len] = '\0';
-  char *argv[10];
-  int argc = 0;
-  char *p = input_copy;
-
-  while (*p != '\0' && argc < 10) {
-    while (isspace((unsigned char)*p)) {
-      p++;
-    }
-
-    if (*p == '\0') {
-      break;
-    }
-
-    char *write = p;
-    char quote = '\0';
-    argv[argc++] = write;
-    while (*p != '\0') {
-      if (quote != '\0') {
-        if (*p == quote) { quote = '\0'; p++; continue; }
-        *write++ = *p++;
-        continue;
-      }
-      if (*p == '"' || *p == '\'') { quote = *p++; continue; }
-      if (isspace((unsigned char)*p)) break;
-      *write++ = *p++;
-    }
-    if (quote != '\0') {
-      printf("Error: Missing closing quote\n");
-      return ESP_ERR_INVALID_ARG;
-    }
-    /* Advance past the delimiter before terminating the compacted token. If
-       the token had no quotes, write and p point at the same whitespace byte. */
-    if (*p != '\0') p++;
-    *write = '\0';
-    while (isspace((unsigned char)*p)) p++;
-  }
-
-  if (argc == 0) {
-    return ESP_ERR_INVALID_ARG;
-  }
-
-  if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-    shell_print_command_help(argv[0]);
-    return ESP_OK;
-  }
-
-  CommandFunction cmd_func = find_command(argv[0]);
-  if (cmd_func != NULL) {
-    // Add command to history before executing
-    command_history_add(input);
-    cmd_func(argc, argv);
-    return ESP_OK;
-  } else {
-    // Don't pollute history with typos and unknown commands
-    handle_unknown_command(argv[0]);
-    return ESP_ERR_INVALID_ARG;
-  }
-}
-
-void simulateCommand(const char *commandString) {
-  if (commandQueue) {
-    SerialCommand command;
-    strncpy(command.command, commandString, sizeof(command.command) - 1);
-    command.command[sizeof(command.command) - 1] = '\0';
-    if (xQueueSend(commandQueue, &command, 0) == pdTRUE) {
-      return;
-    }
-  }
-  handle_serial_command(commandString);
-}
