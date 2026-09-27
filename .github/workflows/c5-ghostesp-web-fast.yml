@@ -1,4 +1,5 @@
 name: C5 GhostESP Web Fast
+# C5-only validation workflow: build from official GhostESP source plus minimal C5 patches.
 
 on:
   push:
