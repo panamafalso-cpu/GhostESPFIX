@@ -31,7 +31,6 @@
 #include <string.h>
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include <unistd.h>
-#include <sys/select.h>
 #endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
@@ -78,23 +77,21 @@ static bool s_uart_paused = false;   // temporarily hand the UART driver to anot
 
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
+  (void)ticks_to_wait;
   if (buf == NULL || len == 0) return 0;
-  fd_set readfds;
-  FD_ZERO(&readfds);
-  FD_SET(STDIN_FILENO, &readfds);
-  struct timeval tv = {
-    .tv_sec = ticks_to_wait / configTICK_RATE_HZ,
-    .tv_usec = (suseconds_t)(((ticks_to_wait % configTICK_RATE_HZ) * 1000000ULL) /
-                              configTICK_RATE_HZ),
-  };
-  int ret = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
-  if (ret <= 0 || !FD_ISSET(STDIN_FILENO, &readfds)) return 0;
+  // ESP-IDF's primary USB Serial/JTAG console exposes stdin through VFS.
+  // Its default VFS read is already non-blocking, so do not layer select()
+  // on top of it. This keeps SerialManager completely independent of the
+  // low-level USB driver lifetime.
   ssize_t n = read(STDIN_FILENO, buf, len);
   return n > 0 ? (int)n : 0;
 }
 static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to_wait) {
   (void)ticks_to_wait;
   if (buf == NULL || len == 0) return 0;
+  // Write directly through the primary console VFS. ESP-IDF owns the USB
+  // Serial/JTAG driver and VFS backend; SerialManager never installs,
+  // uninstalls, or calls the low-level driver in this path.
   ssize_t n = write(STDOUT_FILENO, buf, len);
   return n > 0 ? (int)n : 0;
 }
