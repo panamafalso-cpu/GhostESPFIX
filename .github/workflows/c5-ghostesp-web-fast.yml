@@ -151,7 +151,11 @@ jobs:
             0x8000 c5-artifact/partitions.bin \
             0x10000 c5-artifact/firmware.bin
 
-          python -m esptool --chip esp32c5 image-info c5-artifact/GhostESP-C5-WebFast-merged.bin
+          # A merged flash image is a sparse flash map beginning at 0x0,
+          # so image-info must not parse it as if it were a single image.
+          # Validate the actual image files individually instead.
+          python -m esptool --chip esp32c5 image-info c5-artifact/bootloader.bin
+          python -m esptool --chip esp32c5 image-info c5-artifact/firmware.bin
           sha256sum c5-artifact/*
           (cd c5-artifact && zip -9 ../GhostESP-C5-WebFast.zip ./*)
 
