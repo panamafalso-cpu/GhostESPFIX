@@ -1098,14 +1098,16 @@ void serial_manager_restore_console(void) {
   if (!s_serial_initialized) {
     return;
   }
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  // ESP-IDF owns the primary USB Serial/JTAG driver. Never race it by
+  // reinstalling the low-level driver during a console restore.
+  ESP_LOGI("SerialManager", "USB-JTAG primary console; restore owned by ESP-IDF");
+  return;
+#else
   usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
       .rx_buffer_size = BUF_SIZE,
       .tx_buffer_size = BUF_SIZE,
   };
-  /* TinyUSB disconnect is asynchronous on the S3. Retry briefly so the
-   * console driver does not lose the race for the USB peripheral when a HID
-   * view is closed. Return immediately after the first successful install to
-   * avoid treating an already-restored driver as an error. */
   esp_err_t ret = ESP_FAIL;
   for (int attempt = 0; attempt < 5; attempt++) {
     ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
@@ -1115,9 +1117,9 @@ void serial_manager_restore_console(void) {
     }
     vTaskDelay(pdMS_TO_TICKS(100));
   }
-  ESP_LOGW("SerialManager",
-           "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
+  ESP_LOGW("SerialManager", "USB-JTAG restore skipped: %s",
            esp_err_to_name(ret));
+#endif
 #endif
 }
 
