@@ -5,26 +5,55 @@ import subprocess
 import sys
 
 root = pathlib.Path(".")
-src = (root / "main/core/serial_manager.c").read_text()
+src_root = root / "main"
+serial = (src_root / "core/serial_manager.c").read_text()
 cfg = (root / "build/config/sdkconfig.h").read_text()
 
 checks = [
-    ("USB primary console enabled", "#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG 1" in cfg),
-    ("USB secondary console disabled", "#define CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG 1" not in cfg),
-    ("Automatic light sleep is not enabled by PM (USB option not applicable)", "CONFIG_PM_ENABLE" not in cfg),
-    ("SerialManager does not call low-level USB read in primary path",
-     "serial_usb_read_bytes(void *buf" in src and "usb_serial_jtag_read_bytes(" in src),
-    ("SerialManager does not call low-level USB write in primary path",
-     "serial_usb_write_bytes(const void *buf" in src and "usb_serial_jtag_write_bytes(" in src),
+    ("USB primary console enabled",
+     "#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG 1" in cfg),
+    ("USB secondary console disabled",
+     "#define CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG 1" not in cfg),
+    ("Automatic power-management sleep disabled",
+     "#define CONFIG_PM_ENABLE 1" not in cfg),
+    ("Primary USB path uses VFS stdin",
+     "read(STDIN_FILENO" in serial),
+    ("Primary USB path uses VFS stdout",
+     "write(STDOUT_FILENO" in serial),
+    ("Primary USB path does not use select()",
+     "select(" not in serial.split("#else", 1)[0]),
+    ("Primary USB path does not install/uninstall low-level driver",
+     "usb_serial_jtag_driver_" not in serial.split("#else", 1)[0]),
 ]
 
-# Verify the primary-console implementation is VFS based.
-primary = src[src.find("static int serial_usb_read_bytes"):src.find("#else", src.find("static int serial_usb_read_bytes"))]
-checks.append(("Primary branch uses POSIX console VFS", "STDIN_FILENO" in primary and "STDOUT_FILENO" in primary))
-checks.append(("Primary branch has no direct USB driver API", "usb_serial_jtag_" not in primary))
+# ESP32-C5 USB is fixed to GPIO13=D- and GPIO14=D+. Reject application code
+# that explicitly reconfigures those pins. Kconfig may mention them for a
+# disabled display profile, so only source-level GPIO operations are banned.
+usb_pin_hits = []
+for p in src_root.rglob("*"):
+    if p.suffix not in {".c", ".h", ".cpp", ".hpp"}:
+        continue
+    text = p.read_text(errors="ignore")
+    for m in re.finditer(r"gpio_(?:set_direction|set_level|reset_pin|config|install_isr_service|isr_handler_add)\s*\([^\n;]*(?:13|14)", text):
+        usb_pin_hits.append(f"{p}:{text[:m.start()].count(chr(10))+1}")
+checks.append(("No source GPIO operation targets USB pins 13/14", not usb_pin_hits))
+
+# Reject explicit sleep entry in application source for the C5 build.
+sleep_hits = []
+for p in src_root.rglob("*.c"):
+    text = p.read_text(errors="ignore")
+    if re.search(r"\besp_(?:light|deep)_sleep_start\s*\(", text):
+        sleep_hits.append(str(p))
+checks.append(("No application light/deep sleep entry", not sleep_hits))
 
 for name, ok in checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
+
+if usb_pin_hits:
+    print("[FAIL] USB pin references:", ", ".join(usb_pin_hits))
+if sleep_hits:
+    print("[FAIL] Sleep entry references:", ", ".join(sleep_hits))
+
 if not all(ok for _, ok in checks):
     sys.exit(1)
 
@@ -33,21 +62,23 @@ if not elf.exists():
     print("[FAIL] ELF not found")
     sys.exit(1)
 
-nm = "riscv32-esp-elf-nm"
+# Ensure the final ELF does not retain unresolved low-level USB calls.
 try:
-    symbols = subprocess.check_output([nm, "-u", str(elf)], text=True, stderr=subprocess.STDOUT)
-except Exception as e:
-    print("[FAIL] Could not inspect ELF undefined symbols:", e)
+    symbols = subprocess.check_output(
+        ["riscv32-esp-elf-nm", "-u", str(elf)],
+        text=True, stderr=subprocess.STDOUT)
+except Exception as exc:
+    print("[FAIL] Could not inspect ELF undefined symbols:", exc)
     sys.exit(1)
 
-for sym in ("usb_serial_jtag_read_bytes", "usb_serial_jtag_write_bytes", "usb_serial_jtag_driver_uninstall"):
+for sym in ("usb_serial_jtag_read_bytes",
+            "usb_serial_jtag_write_bytes",
+            "usb_serial_jtag_driver_uninstall"):
     if sym in symbols:
         print(f"[FAIL] ELF still has undefined reference to {sym}")
         sys.exit(1)
     print(f"[PASS] ELF has no undefined reference to {sym}")
 
-# Watch application-partition headroom. The current C5 layout is already tight,
-# so report it explicitly and fail only if it becomes critically low.
 app_bin = root / "build/Ghost_ESP_IDF.bin"
 part_csv = root / "build/partition_table/partition-table.csv"
 if app_bin.exists() and part_csv.exists():
@@ -67,9 +98,7 @@ if app_bin.exists() and part_csv.exists():
             sys.exit(1)
         if pct < 5.0:
             print("[WARN] C5 app partition headroom is below 5%")
-    else:
-        print("[WARN] Could not determine app partition size from partition-table.csv")
 else:
     print("[WARN] Could not inspect C5 app partition headroom")
 
-print("[PASS] C5 USB deep static/ELF validation complete")
+print("[PASS] C5 USB v4 deep static/ELF validation complete")
