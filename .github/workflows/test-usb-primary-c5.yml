@@ -97,7 +97,7 @@ jobs:
               hex(min(apps)),"artifacts/esp32c5-usb-final-v4/firmware.bin"],check=True)
           PY
           cd artifacts
-          zip -r ../esp32c5-usb-final-v4.zip esp32c5-usb-primary
+          zip -r ../esp32c5-usb-final-v4.zip esp32c5-usb-final-v4
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
@@ -201,10 +201,8 @@ jobs:
           grep -q 'static bool serial_usb_driver_ready' "$src"
           grep -q 'serial_usb_wait_for_driver' "$src"
           ! grep -q '#include <unistd.h>' "$src"
-          # Exactly two low-level calls are allowed: the guarded helper bodies.
           test "$(grep -c 'usb_serial_jtag_read_bytes(' "$src")" -eq 1
           test "$(grep -c 'usb_serial_jtag_write_bytes(' "$src")" -eq 1
-          # Primary-console mode must never uninstall or reinstall IDF's driver.
           grep -q '#if JTAG_SUPPORTED && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)' "$src"
           grep -q 'CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG' "$src"
 
