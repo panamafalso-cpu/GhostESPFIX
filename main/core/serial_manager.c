@@ -34,6 +34,7 @@
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include <unistd.h>
 #include <sys/select.h>
+#include <fcntl.h>
 static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
   (void)ticks_to_wait;
   if (buf == NULL || len == 0) return 0;
