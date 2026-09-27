@@ -79,6 +79,8 @@ static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to
 #endif
 }
 
+#endif /* JTAG_SUPPORTED */
+
 #if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
 #define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
 #else
