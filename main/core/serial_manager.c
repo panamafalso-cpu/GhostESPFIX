@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
     defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -46,6 +47,37 @@
 #define SERIAL_TASK_STACK_SIZE_INTERNAL 8192
 #define SERIAL_TASK_STACK_SIZE_PSRAM 8192
 #define SERIAL_TASK_USE_PSRAM_STACK 0
+
+#if JTAG_SUPPORTED
+/*
+ * C5 USB console ownership:
+ * When ESP-IDF exposes USB Serial/JTAG as the primary console, the IDF
+ * console/VFS owns the low-level driver. SerialManager must not install,
+ * uninstall, or call the low-level driver directly in that configuration.
+ */
+static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+    (void)ticks_to_wait;
+    if (buf == NULL || len == 0) return 0;
+    ssize_t ret = read(STDIN_FILENO, buf, len);
+    return ret > 0 ? (int)ret : 0;
+#else
+    if (!usb_serial_jtag_is_driver_installed()) return 0;
+    return usb_serial_jtag_read_bytes(buf, len, ticks_to_wait);
+#endif
+}
+
+static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to_wait) {
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+    (void)ticks_to_wait;
+    if (buf == NULL || len == 0) return 0;
+    ssize_t ret = write(STDOUT_FILENO, buf, len);
+    return ret > 0 ? (int)ret : 0;
+#else
+    if (!usb_serial_jtag_is_driver_installed()) return 0;
+    return usb_serial_jtag_write_bytes((const uint8_t *)buf, (uint32_t)len, ticks_to_wait);
+#endif
+}
 
 #if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
 #define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
@@ -989,12 +1021,16 @@ void serial_manager_init() {
   }
 
 #if JTAG_SUPPORTED
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  ESP_LOGI("SerialManager", "USB-JTAG primary console owned by ESP-IDF/VFS");
+#else
   usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
       .rx_buffer_size = BUF_SIZE,
       .tx_buffer_size = BUF_SIZE,
   };
-  usb_serial_jtag_driver_install(&usb_serial_jtag_config);
-  ESP_LOGI("SerialManager", "USB-JTAG installed: RX=%d TX=%d bytes", BUF_SIZE, BUF_SIZE);
+  esp_err_t usb_ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
+  ESP_LOGI("SerialManager", "USB-JTAG install: %s", esp_err_to_name(usb_ret));
+#endif
 #endif
 
   commandQueue = xQueueCreate(6, sizeof(SerialCommand));
@@ -1059,7 +1095,7 @@ void serial_manager_deinit() {
     vTaskDelete(s_serial_task_handle);
     s_serial_task_handle = NULL;
   }
-#if JTAG_SUPPORTED
+#if JTAG_SUPPORTED && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
   usb_serial_jtag_driver_uninstall();
 #endif
   uart_driver_delete(UART_NUM);
@@ -1073,6 +1109,10 @@ void serial_manager_deinit() {
 
 void serial_manager_restore_console(void) {
 #if JTAG_SUPPORTED
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  // ESP-IDF owns the primary USB console; there is nothing to reinstall.
+  return;
+#else
   if (!s_serial_initialized) {
     return;
   }
@@ -1096,6 +1136,7 @@ void serial_manager_restore_console(void) {
   ESP_LOGW("SerialManager",
            "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
            esp_err_to_name(ret));
+#endif
 #endif
 }
 
