@@ -1,4 +1,5 @@
 name: C5 FINAL v4 - USB Serial-JTAG stable
+# Clean workflow: proven primary-console base + guarded startup race fix
 
 on:
   push:
