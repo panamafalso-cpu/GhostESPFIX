@@ -1,0 +1,163 @@
+name: C5 GhostESP Web Fast
+
+on:
+  push:
+    branches:
+      - c5-ghostesp-web-fast
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-c5:
+    name: Build ESP32-C5 generic
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Cache ESP-IDF 6.1
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/esp-idf
+            ~/.espressif
+          key: esp-idf-v6.1-${{ runner.os }}-c5-web-v1
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget git flex bison gperf python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util
+
+      - name: Install ESP-IDF 6.1
+        run: |
+          if [ ! -d "$HOME/esp-idf/.git" ]; then
+            git clone -b v6.1 --depth 1 --recursive https://github.com/espressif/esp-idf.git "$HOME/esp-idf"
+            "$HOME/esp-idf/install.sh"
+          fi
+
+      - name: Repair/check ESP-IDF environment
+        run: |
+          . "$HOME/esp-idf/export.sh"
+          idf.py --version
+          python -m esptool version
+
+      - name: Prepare C5 sdkconfig
+        run: |
+          rm -f sdkconfig sdkconfig.defaults
+          cp configs/sdkconfig.default.esp32c5 sdkconfig.defaults
+          cp configs/sdkconfig.default.esp32c5 sdkconfig
+          printf "\n# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig.defaults
+          printf "\n# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig.defaults
+          printf "\n# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig
+          printf "\n# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig
+
+      - name: Validate C5 USB ownership and WebUI patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          cfg = Path("sdkconfig.defaults").read_text()
+          serial = Path("main/core/serial_manager.c").read_text()
+          ap = Path("main/managers/ap_manager.c").read_text()
+
+          required = [
+              "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
+              "# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set",
+              "CONFIG_ESP_CONSOLE_SECONDARY_NONE=y",
+          ]
+          for item in required:
+              if item not in cfg:
+                  raise SystemExit(f"missing required C5 config: {item}")
+
+          if "usb_serial_jtag_driver_install(&usb_serial_jtag_config)" not in serial:
+              raise SystemExit("low-level USB install path missing")
+          if "serial_usb_read_bytes" not in serial or "serial_usb_write_bytes" not in serial:
+              raise SystemExit("USB wrapper path missing")
+          if "read(STDIN_FILENO" not in serial or "write(STDOUT_FILENO" not in serial:
+              raise SystemExit("primary USB console is not using VFS")
+          if "server_config.lru_purge_enable = true;" not in ap:
+              raise SystemExit("WebUI LRU tuning missing")
+          if "Start the HTTP server before mDNS" not in ap:
+              raise SystemExit("HTTP-before-mDNS ordering patch missing")
+
+          print("C5 source/config validation passed")
+          PY
+
+      - name: Set ESP-IDF target
+        run: |
+          . "$HOME/esp-idf/export.sh"
+          idf.py set-target esp32c5
+
+      - name: Build
+        run: |
+          . "$HOME/esp-idf/export.sh"
+          export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+          idf.py reconfigure
+          idf.py build
+
+      - name: Check size and partition fit
+        run: |
+          . "$HOME/esp-idf/export.sh"
+          idf.py size
+          python3 scripts/partition_table.py check-fit build/Ghost_ESP_IDF.bin build/partition_table/partition-table.bin
+
+      - name: Verify flash layout
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          cfg = Path("build/config/sdkconfig.h").read_text()
+          def val(name, default=None):
+              m = re.search(rf'#define {re.escape(name)} "([^"]+)"', cfg)
+              return m.group(1) if m else default
+
+          mode = val("CONFIG_ESPTOOLPY_FLASHMODE", "dio")
+          freq = val("CONFIG_ESPTOOLPY_FLASHFREQ", "80m")
+          size = val("CONFIG_ESPTOOLPY_FLASHSIZE", "4MB")
+          print(f"Resolved flash config: mode={mode} freq={freq} size={size}")
+
+          if mode != "dio" or size != "4MB":
+              raise SystemExit("Unexpected C5 flash mode/size")
+          PY
+
+          test -f build/bootloader/bootloader.bin
+          test -f build/partition_table/partition-table.bin
+          test -f build/Ghost_ESP_IDF.bin
+
+      - name: Package and merge C5 image
+        run: |
+          . "$HOME/esp-idf/export.sh"
+          rm -rf c5-artifact
+          mkdir -p c5-artifact
+
+          cp build/bootloader/bootloader.bin c5-artifact/bootloader.bin
+          cp build/partition_table/partition-table.bin c5-artifact/partitions.bin
+          cp build/Ghost_ESP_IDF.bin c5-artifact/firmware.bin
+          cp build/Ghost_ESP_IDF.elf c5-artifact/Ghost_ESP_IDF.elf
+
+          python -m esptool --chip esp32c5 merge-bin \
+            -o c5-artifact/GhostESP-C5-WebFast-merged.bin \
+            --flash-mode dio --flash-freq 80m --flash-size 4MB \
+            0x2000 c5-artifact/bootloader.bin \
+            0x8000 c5-artifact/partitions.bin \
+            0x10000 c5-artifact/firmware.bin
+
+          python -m esptool --chip esp32c5 image-info c5-artifact/GhostESP-C5-WebFast-merged.bin
+          sha256sum c5-artifact/*
+          (cd c5-artifact && zip -9 ../GhostESP-C5-WebFast.zip ./*)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GhostESP-C5-WebFast
+          path: GhostESP-C5-WebFast.zip
+          if-no-files-found: error
+          retention-days: 90
