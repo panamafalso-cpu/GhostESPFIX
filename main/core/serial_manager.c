@@ -29,6 +29,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+#include <unistd.h>
+#include <sys/select.h>
+#endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
     defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -72,6 +76,39 @@ static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
 static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
 
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
+  if (buf == NULL || len == 0) return 0;
+  fd_set readfds;
+  FD_ZERO(&readfds);
+  FD_SET(STDIN_FILENO, &readfds);
+  struct timeval tv = {
+    .tv_sec = ticks_to_wait / configTICK_RATE_HZ,
+    .tv_usec = (suseconds_t)(((ticks_to_wait % configTICK_RATE_HZ) * 1000000ULL) /
+                              configTICK_RATE_HZ),
+  };
+  int ret = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
+  if (ret <= 0 || !FD_ISSET(STDIN_FILENO, &readfds)) return 0;
+  ssize_t n = read(STDIN_FILENO, buf, len);
+  return n > 0 ? (int)n : 0;
+}
+static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to_wait) {
+  (void)ticks_to_wait;
+  if (buf == NULL || len == 0) return 0;
+  ssize_t n = write(STDOUT_FILENO, buf, len);
+  return n > 0 ? (int)n : 0;
+}
+#else
+static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
+  if (!usb_serial_jtag_is_driver_installed()) return 0;
+  return usb_serial_jtag_read_bytes(buf, len, ticks_to_wait);
+}
+static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to_wait) {
+  if (!usb_serial_jtag_is_driver_installed()) return 0;
+  return usb_serial_jtag_write_bytes(buf, len, ticks_to_wait);
+}
+#endif
+
 static bool serial_should_disable_uart(void) {
   return false;
 }
@@ -88,7 +125,7 @@ int serial_manager_write_bytes(const void *data, size_t len) {
   }
 
 #if JTAG_SUPPORTED
-  usb_serial_jtag_write_bytes((const uint8_t *)data, (uint32_t)len, 0);
+  serial_usb_write_bytes((const uint8_t *)data, (uint32_t)len, 0);
 #endif
 
   return written;
@@ -417,7 +454,7 @@ static void move_cursor_to_position(int new_pos) {
             const char right_arrow[] = "\033[C";
             uart_write_bytes(UART_NUM, right_arrow, 3);
 #if JTAG_SUPPORTED
-            usb_serial_jtag_write_bytes((const uint8_t*)right_arrow, 3, 0);
+            serial_usb_write_bytes((const uint8_t*)right_arrow, 3, 0);
 #endif
         }
     } else if (move_count < 0) {
@@ -426,7 +463,7 @@ static void move_cursor_to_position(int new_pos) {
             const char left_arrow[] = "\033[D";
             uart_write_bytes(UART_NUM, left_arrow, 3);
 #if JTAG_SUPPORTED
-            usb_serial_jtag_write_bytes((const uint8_t*)left_arrow, 3, 0);
+            serial_usb_write_bytes((const uint8_t*)left_arrow, 3, 0);
 #endif
         }
     }
@@ -448,14 +485,14 @@ static void insert_character_at_cursor(char c) {
     // Display the character and move cursor right
     uart_write_bytes(UART_NUM, &c, 1);
 #if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)&c, 1, 0);
+    serial_usb_write_bytes((const uint8_t*)&c, 1, 0);
 #endif
     
     // Display remaining characters
     for (int i = cursor_position + 1; i <= len; i++) {
         uart_write_bytes(UART_NUM, &serial_buffer[i], 1);
 #if JTAG_SUPPORTED
-        usb_serial_jtag_write_bytes((const uint8_t*)&serial_buffer[i], 1, 0);
+        serial_usb_write_bytes((const uint8_t*)&serial_buffer[i], 1, 0);
 #endif
     }
     
@@ -464,7 +501,7 @@ static void insert_character_at_cursor(char c) {
         const char left_arrow[] = "\033[D";
         uart_write_bytes(UART_NUM, left_arrow, 3);
 #if JTAG_SUPPORTED
-        usb_serial_jtag_write_bytes((const uint8_t*)left_arrow, 3, 0);
+        serial_usb_write_bytes((const uint8_t*)left_arrow, 3, 0);
 #endif
     }
     
@@ -487,7 +524,7 @@ static void delete_character_at_cursor(void) {
     for (int i = cursor_position; i < new_len; i++) {
         uart_write_bytes(UART_NUM, &serial_buffer[i], 1);
 #if JTAG_SUPPORTED
-        usb_serial_jtag_write_bytes((const uint8_t*)&serial_buffer[i], 1, 0);
+        serial_usb_write_bytes((const uint8_t*)&serial_buffer[i], 1, 0);
 #endif
     }
     
@@ -495,7 +532,7 @@ static void delete_character_at_cursor(void) {
     const char space[] = " ";
     uart_write_bytes(UART_NUM, space, 1);
 #if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)space, 1, 0);
+    serial_usb_write_bytes((const uint8_t*)space, 1, 0);
 #endif
     
     // Move cursor back to correct position
@@ -503,7 +540,7 @@ static void delete_character_at_cursor(void) {
         const char left_arrow[] = "\033[D";
         uart_write_bytes(UART_NUM, left_arrow, 3);
 #if JTAG_SUPPORTED
-        usb_serial_jtag_write_bytes((const uint8_t*)left_arrow, 3, 0);
+        serial_usb_write_bytes((const uint8_t*)left_arrow, 3, 0);
 #endif
     }
 }
@@ -516,7 +553,7 @@ static void backspace_at_cursor(void) {
     const char left_arrow[] = "\033[D";
     uart_write_bytes(UART_NUM, left_arrow, 3);
 #if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)left_arrow, 3, 0);
+    serial_usb_write_bytes((const uint8_t*)left_arrow, 3, 0);
 #endif
     
     // Shift characters to the left (delete character at cursor_position - 1)
@@ -531,7 +568,7 @@ static void backspace_at_cursor(void) {
     for (int i = cursor_position - 1; i < new_len; i++) {
         uart_write_bytes(UART_NUM, &serial_buffer[i], 1);
 #if JTAG_SUPPORTED
-        usb_serial_jtag_write_bytes((const uint8_t*)&serial_buffer[i], 1, 0);
+        serial_usb_write_bytes((const uint8_t*)&serial_buffer[i], 1, 0);
 #endif
     }
     
@@ -539,14 +576,14 @@ static void backspace_at_cursor(void) {
     const char space[] = " ";
     uart_write_bytes(UART_NUM, space, 1);
 #if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)space, 1, 0);
+    serial_usb_write_bytes((const uint8_t*)space, 1, 0);
 #endif
     
     // Move cursor back to correct position
     for (int i = len - cursor_position + 1; i > 0; i--) {
         uart_write_bytes(UART_NUM, left_arrow, 3);
 #if JTAG_SUPPORTED
-        usb_serial_jtag_write_bytes((const uint8_t*)left_arrow, 3, 0);
+        serial_usb_write_bytes((const uint8_t*)left_arrow, 3, 0);
 #endif
     }
     
@@ -559,7 +596,7 @@ static void clear_line_from_cursor(void) {
     const char clear_to_eol[] = "\033[K";
     uart_write_bytes(UART_NUM, clear_to_eol, 3);
 #if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)clear_to_eol, 3, 0);
+    serial_usb_write_bytes((const uint8_t*)clear_to_eol, 3, 0);
 #endif
     // Truncate buffer at cursor position
     serial_buffer[cursor_position] = '\0';
@@ -570,13 +607,13 @@ static void clear_entire_line(void) {
     const char cr[] = "\r";
     uart_write_bytes(UART_NUM, cr, 1);
 #if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)cr, 1, 0);
+    serial_usb_write_bytes((const uint8_t*)cr, 1, 0);
 #endif
     // Clear entire line using ANSI escape sequence
     const char clear_line[] = "\033[2K";
     uart_write_bytes(UART_NUM, clear_line, 4);
 #if JTAG_SUPPORTED
-    usb_serial_jtag_write_bytes((const uint8_t*)clear_line, 4, 0);
+    serial_usb_write_bytes((const uint8_t*)clear_line, 4, 0);
 #endif
 }
 
@@ -725,7 +762,7 @@ void serial_task(void *pvParameter) {
 #if JTAG_SUPPORTED
     if (length <= 0) {
       length =
-          usb_serial_jtag_read_bytes(data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
+          serial_usb_read_bytes(data, BUF_SIZE, 10 / portTICK_PERIOD_MS);
       if (length > 0) read_source = 1;
     }
 #endif
@@ -804,7 +841,7 @@ void serial_task(void *pvParameter) {
               if (index > 0) {
                 uart_write_bytes(UART_NUM, history_cmd, index);
 #if JTAG_SUPPORTED
-                usb_serial_jtag_write_bytes((const uint8_t*)history_cmd, index, 0);
+                serial_usb_write_bytes((const uint8_t*)history_cmd, index, 0);
 #endif
               }
             }
@@ -832,7 +869,7 @@ void serial_task(void *pvParameter) {
               if (index > 0) {
                 uart_write_bytes(UART_NUM, history_cmd, index);
 #if JTAG_SUPPORTED
-                usb_serial_jtag_write_bytes((const uint8_t*)history_cmd, index, 0);
+                serial_usb_write_bytes((const uint8_t*)history_cmd, index, 0);
 #endif
               }
             } else {
@@ -886,7 +923,7 @@ void serial_task(void *pvParameter) {
           const char newline[] = "\n";
           if (!s_uart_disabled && !s_uart_paused) uart_write_bytes(UART_NUM, newline, 1);
 #if JTAG_SUPPORTED
-          usb_serial_jtag_write_bytes((const uint8_t*)newline, 1, 0);
+          serial_usb_write_bytes((const uint8_t*)newline, 1, 0);
 #endif
           serial_buffer[index] = '\0';
           if (index > 0) {
@@ -1065,7 +1102,7 @@ void serial_manager_deinit() {
     vTaskDelete(s_serial_task_handle);
     s_serial_task_handle = NULL;
   }
-#if JTAG_SUPPORTED
+#if JTAG_SUPPORTED && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
   usb_serial_jtag_driver_uninstall();
 #endif
   uart_driver_delete(UART_NUM);
@@ -1082,6 +1119,10 @@ void serial_manager_restore_console(void) {
   if (!s_serial_initialized) {
     return;
   }
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  ESP_LOGI("SerialManager", "USB-JTAG primary console owned by ESP-IDF; restore skipped");
+  return;
+#else
   usb_serial_jtag_driver_config_t usb_serial_jtag_config = {
       .rx_buffer_size = BUF_SIZE,
       .tx_buffer_size = BUF_SIZE,
@@ -1102,6 +1143,7 @@ void serial_manager_restore_console(void) {
   ESP_LOGW("SerialManager",
            "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
            esp_err_to_name(ret));
+#endif
 #endif
 }
 
