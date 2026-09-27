@@ -2,7 +2,7 @@ name: C5 TEST - USB Serial-JTAG primary
 
 on:
   push:
-    branches: [test-usb-primary-c5]
+    branches: [test-usb-primary-c5, c5-usb-primary-safe-v1]
   workflow_dispatch:
 
 permissions:
