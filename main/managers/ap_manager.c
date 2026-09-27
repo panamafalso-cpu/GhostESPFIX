@@ -60,8 +60,7 @@ static const char *TAG = "ap_manager";
 
 static esp_err_t respond_with_site(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store, must-revalidate");
-    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=300, must-revalidate");
 #if GHOST_SITE_IS_GZ
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
 #endif
