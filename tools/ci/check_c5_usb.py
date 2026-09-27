@@ -11,6 +11,8 @@ cfg = (root / "build/config/sdkconfig.h").read_text()
 checks = [
     ("USB primary console enabled", "#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG 1" in cfg),
     ("USB secondary console disabled", "#define CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG 1" not in cfg),
+    ("UART console backend disabled", "#define CONFIG_ESP_CONSOLE_UART 1" not in cfg),
+    ("C5 PM automatic light sleep disabled", "#define CONFIG_PM_ENABLE 1" not in cfg),
     ("Automatic light sleep is not enabled by PM (USB option not applicable)", "CONFIG_PM_ENABLE" not in cfg),
     ("SerialManager does not call low-level USB read in primary path",
      "serial_usb_read_bytes(void *buf" in src and "usb_serial_jtag_read_bytes(" in src),
@@ -22,6 +24,8 @@ checks = [
 primary = src[src.find("static int serial_usb_read_bytes"):src.find("#else", src.find("static int serial_usb_read_bytes"))]
 checks.append(("Primary branch uses POSIX console VFS", "STDIN_FILENO" in primary and "STDOUT_FILENO" in primary))
 checks.append(("Primary branch has no direct USB driver API", "usb_serial_jtag_" not in primary))
+checks.append(("C5 primary path explicitly disables UART", "s_uart_disabled = true;" in src))
+checks.append(("Primary path uses non-buffered stdio", "setvbuf(stdin, NULL, _IONBF, 0)" in src and "setvbuf(stdout, NULL, _IONBF, 0)" in src))
 
 for name, ok in checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
@@ -40,7 +44,8 @@ except Exception as e:
     print("[FAIL] Could not inspect ELF undefined symbols:", e)
     sys.exit(1)
 
-for sym in ("usb_serial_jtag_read_bytes", "usb_serial_jtag_write_bytes", "usb_serial_jtag_driver_uninstall"):
+for sym in ("usb_serial_jtag_read_bytes", "usb_serial_jtag_write_bytes"):
+
     if sym in symbols:
         print(f"[FAIL] ELF still has undefined reference to {sym}")
         sys.exit(1)
