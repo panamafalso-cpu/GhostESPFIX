@@ -12,16 +12,18 @@ checks = [
     ("USB primary console enabled", "#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG 1" in cfg),
     ("USB secondary console disabled", "#define CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG 1" not in cfg),
     ("Automatic light sleep is not enabled by PM (USB option not applicable)", "CONFIG_PM_ENABLE" not in cfg),
-    ("SerialManager does not call low-level USB read in primary path",
-     "serial_usb_read_bytes(void *buf" in src and "usb_serial_jtag_read_bytes(" in src),
-    ("SerialManager does not call low-level USB write in primary path",
-     "serial_usb_write_bytes(const void *buf" in src and "usb_serial_jtag_write_bytes(" in src),
+    ("SerialManager defines the USB read wrapper",
+     "static int serial_usb_read_bytes(void *buf" in src),
+    ("SerialManager defines the USB write wrapper",
+     "static int serial_usb_write_bytes(const void *buf" in src),
 ]
 
 # Verify the primary-console implementation is VFS based.
 primary = src[src.find("static int serial_usb_read_bytes"):src.find("#else", src.find("static int serial_usb_read_bytes"))]
 checks.append(("Primary branch uses POSIX console VFS", "STDIN_FILENO" in primary and "STDOUT_FILENO" in primary))
 checks.append(("Primary branch has no direct USB driver API", "usb_serial_jtag_" not in primary))
+checks.append(("Primary branch does not use select()", "select(" not in primary))
+checks.append(("Primary branch does not include select header", "#include <sys/select.h>" not in src))
 
 for name, ok in checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
