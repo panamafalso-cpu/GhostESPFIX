@@ -1,8 +1,8 @@
-name: C5 TEST - USB Serial-JTAG primary
+name: C5 FINAL v4 - USB Serial-JTAG stable
 
 on:
   push:
-    branches: [test-usb-primary-c5]
+    branches: [c5-usb-final-v4]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
           path: |
             ~/esp-idf
             ~/.espressif
-          key: esp-idf-v6.1-${{ runner.os }}-usb-primary-v1
+          key: esp-idf-v6.1-${{ runner.os }}-usb-final-v4
       - name: Install host dependencies
         if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
@@ -52,8 +52,12 @@ jobs:
           printf "# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig.defaults
           printf "# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig
           printf "# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig
-      - name: Build
-        env:
+      - name: Rigorous C5 USB source validation
+        run: |
+          set -euo pipefail
+          cfg=configs/sdkconfig.default.esp32c5
+          src=main/core/serial_manager.c
+          grep -q '^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y        env:
           SDKCONFIG_DEFAULTS: sdkconfig.defaults
         run: |
           . ~/esp-idf/export.sh
@@ -63,15 +67,15 @@ jobs:
           idf.py build
       - name: Package
         run: |
-          mkdir -p artifacts/esp32c5-usb-primary
-          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-primary/partitions.bin
-          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-primary/bootloader.bin
-          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-primary/firmware.bin
-          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-primary/esp32c5-usb-primary.elf
+          mkdir -p artifacts/esp32c5-usb-final-v4
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-final-v4/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-final-v4/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-final-v4/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-final-v4/esp32c5-usb-final-v4.elf
           . ~/esp-idf/export.sh
           python3 - <<'PY'
           import pathlib, struct, subprocess, re
-          t=pathlib.Path("artifacts/esp32c5-usb-primary/partitions.bin").read_bytes()
+          t=pathlib.Path("artifacts/esp32c5-usb-final-v4/partitions.bin").read_bytes()
           fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
           apps=[]
           for pos in range(0,len(t)-sz+1,sz):
@@ -84,18 +88,170 @@ jobs:
               m=re.search(rf'^#define {name} "([^"]+)"',p,re.M)
               return m.group(1) if m else default
           subprocess.run(["python","-m","esptool","--chip","esp32c5","merge-bin",
-              "-o","artifacts/esp32c5-usb-primary/merged.bin",
+              "-o","artifacts/esp32c5-usb-final-v4/merged.bin",
               "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
               "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
               "--flash-size",get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB"),
-              "0x0","artifacts/esp32c5-usb-primary/bootloader.bin",
-              "0x8000","artifacts/esp32c5-usb-primary/partitions.bin",
-              hex(min(apps)),"artifacts/esp32c5-usb-primary/firmware.bin"],check=True)
+              "0x0","artifacts/esp32c5-usb-final-v4/bootloader.bin",
+              "0x8000","artifacts/esp32c5-usb-final-v4/partitions.bin",
+              hex(min(apps)),"artifacts/esp32c5-usb-final-v4/firmware.bin"],check=True)
           PY
           cd artifacts
-          zip -r ../esp32c5-usb-primary-test.zip esp32c5-usb-primary
+          zip -r ../esp32c5-usb-final-v4.zip esp32c5-usb-primary
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: esp32c5-usb-primary-test
-          path: esp32c5-usb-primary-test.zip
+          name: esp32c5-usb-final-v4
+          path: esp32c5-usb-final-v4.zip
+ "$cfg"
+          grep -q '^CONFIG_ESP_CONSOLE_SECONDARY_NONE=y        env:
+          SDKCONFIG_DEFAULTS: sdkconfig.defaults
+        run: |
+          . ~/esp-idf/export.sh
+          export IDF_TARGET=esp32c5
+          export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+          idf.py clean
+          idf.py build
+      - name: Package
+        run: |
+          mkdir -p artifacts/esp32c5-usb-final-v4
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-final-v4/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-final-v4/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-final-v4/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-final-v4/esp32c5-usb-final-v4.elf
+          . ~/esp-idf/export.sh
+          python3 - <<'PY'
+          import pathlib, struct, subprocess, re
+          t=pathlib.Path("artifacts/esp32c5-usb-final-v4/partitions.bin").read_bytes()
+          fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
+          apps=[]
+          for pos in range(0,len(t)-sz+1,sz):
+              magic,ptype,subtype,offset,size,label,flags=struct.unpack(fmt,t[pos:pos+sz])
+              if magic != bytes((0xAA,0x50)): break
+              if ptype == 0: apps.append(offset)
+          if not apps: raise SystemExit("No app partition found")
+          p=pathlib.Path("build/config/sdkconfig.h").read_text()
+          def get(name, default):
+              m=re.search(rf'^#define {name} "([^"]+)"',p,re.M)
+              return m.group(1) if m else default
+          subprocess.run(["python","-m","esptool","--chip","esp32c5","merge-bin",
+              "-o","artifacts/esp32c5-usb-final-v4/merged.bin",
+              "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
+              "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
+              "--flash-size",get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB"),
+              "0x0","artifacts/esp32c5-usb-final-v4/bootloader.bin",
+              "0x8000","artifacts/esp32c5-usb-final-v4/partitions.bin",
+              hex(min(apps)),"artifacts/esp32c5-usb-final-v4/firmware.bin"],check=True)
+          PY
+          cd artifacts
+          zip -r ../esp32c5-usb-final-v4.zip esp32c5-usb-primary
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32c5-usb-final-v4
+          path: esp32c5-usb-final-v4.zip
+ "$cfg"
+          ! grep -q '^CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y        env:
+          SDKCONFIG_DEFAULTS: sdkconfig.defaults
+        run: |
+          . ~/esp-idf/export.sh
+          export IDF_TARGET=esp32c5
+          export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+          idf.py clean
+          idf.py build
+      - name: Package
+        run: |
+          mkdir -p artifacts/esp32c5-usb-final-v4
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-final-v4/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-final-v4/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-final-v4/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-final-v4/esp32c5-usb-final-v4.elf
+          . ~/esp-idf/export.sh
+          python3 - <<'PY'
+          import pathlib, struct, subprocess, re
+          t=pathlib.Path("artifacts/esp32c5-usb-final-v4/partitions.bin").read_bytes()
+          fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
+          apps=[]
+          for pos in range(0,len(t)-sz+1,sz):
+              magic,ptype,subtype,offset,size,label,flags=struct.unpack(fmt,t[pos:pos+sz])
+              if magic != bytes((0xAA,0x50)): break
+              if ptype == 0: apps.append(offset)
+          if not apps: raise SystemExit("No app partition found")
+          p=pathlib.Path("build/config/sdkconfig.h").read_text()
+          def get(name, default):
+              m=re.search(rf'^#define {name} "([^"]+)"',p,re.M)
+              return m.group(1) if m else default
+          subprocess.run(["python","-m","esptool","--chip","esp32c5","merge-bin",
+              "-o","artifacts/esp32c5-usb-final-v4/merged.bin",
+              "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
+              "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
+              "--flash-size",get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB"),
+              "0x0","artifacts/esp32c5-usb-final-v4/bootloader.bin",
+              "0x8000","artifacts/esp32c5-usb-final-v4/partitions.bin",
+              hex(min(apps)),"artifacts/esp32c5-usb-final-v4/firmware.bin"],check=True)
+          PY
+          cd artifacts
+          zip -r ../esp32c5-usb-final-v4.zip esp32c5-usb-primary
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32c5-usb-final-v4
+          path: esp32c5-usb-final-v4.zip
+ "$cfg"
+          grep -q 'static bool serial_usb_driver_ready' "$src"
+          grep -q 'serial_usb_wait_for_driver' "$src"
+          ! grep -q '#include <unistd.h>' "$src"
+          # Exactly two low-level calls are allowed: the guarded helper bodies.
+          test "$(grep -c 'usb_serial_jtag_read_bytes(' "$src")" -eq 1
+          test "$(grep -c 'usb_serial_jtag_write_bytes(' "$src")" -eq 1
+          # Primary-console mode must never uninstall or reinstall IDF's driver.
+          grep -q '#if JTAG_SUPPORTED && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)' "$src"
+          grep -q 'CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG' "$src"
+
+      - name: Build
+        env:
+          SDKCONFIG_DEFAULTS: sdkconfig.defaults
+        run: |
+          . ~/esp-idf/export.sh
+          export IDF_TARGET=esp32c5
+          export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+          idf.py clean
+          idf.py build
+      - name: Package
+        run: |
+          mkdir -p artifacts/esp32c5-usb-final-v4
+          cp build/partition_table/partition-table.bin artifacts/esp32c5-usb-final-v4/partitions.bin
+          cp build/bootloader/bootloader.bin artifacts/esp32c5-usb-final-v4/bootloader.bin
+          cp build/Ghost_ESP_IDF.bin artifacts/esp32c5-usb-final-v4/firmware.bin
+          cp build/Ghost_ESP_IDF.elf artifacts/esp32c5-usb-final-v4/esp32c5-usb-final-v4.elf
+          . ~/esp-idf/export.sh
+          python3 - <<'PY'
+          import pathlib, struct, subprocess, re
+          t=pathlib.Path("artifacts/esp32c5-usb-final-v4/partitions.bin").read_bytes()
+          fmt="<2sBBLL16sL"; sz=struct.calcsize(fmt)
+          apps=[]
+          for pos in range(0,len(t)-sz+1,sz):
+              magic,ptype,subtype,offset,size,label,flags=struct.unpack(fmt,t[pos:pos+sz])
+              if magic != bytes((0xAA,0x50)): break
+              if ptype == 0: apps.append(offset)
+          if not apps: raise SystemExit("No app partition found")
+          p=pathlib.Path("build/config/sdkconfig.h").read_text()
+          def get(name, default):
+              m=re.search(rf'^#define {name} "([^"]+)"',p,re.M)
+              return m.group(1) if m else default
+          subprocess.run(["python","-m","esptool","--chip","esp32c5","merge-bin",
+              "-o","artifacts/esp32c5-usb-final-v4/merged.bin",
+              "--flash-mode",get("CONFIG_ESPTOOLPY_FLASHMODE","dio"),
+              "--flash-freq",get("CONFIG_ESPTOOLPY_FLASHFREQ","40m"),
+              "--flash-size",get("CONFIG_ESPTOOLPY_FLASHSIZE","4MB"),
+              "0x0","artifacts/esp32c5-usb-final-v4/bootloader.bin",
+              "0x8000","artifacts/esp32c5-usb-final-v4/partitions.bin",
+              hex(min(apps)),"artifacts/esp32c5-usb-final-v4/firmware.bin"],check=True)
+          PY
+          cd artifacts
+          zip -r ../esp32c5-usb-final-v4.zip esp32c5-usb-primary
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32c5-usb-final-v4
+          path: esp32c5-usb-final-v4.zip
