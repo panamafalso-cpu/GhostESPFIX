@@ -2,7 +2,9 @@
 #include "core/system_manager.h"
 #include "driver/uart.h"
 #include "core/glog.h"
+#if !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include "driver/usb_serial_jtag.h"
+#endif
 #include "esp_task_wdt.h"
 #include "esp_log.h"
 #include "esp_attr.h"
@@ -30,71 +32,21 @@
 #include <stdlib.h>
 #include <string.h>
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
-#include <unistd.h>
-#include <sys/select.h>
-#endif
-
-#if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
-    defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-#define JTAG_SUPPORTED 1
-#else
-#define JTAG_SUPPORTED 0
-#endif
-#ifndef CONFIG_USE_TDECK
-#define UART_NUM UART_NUM_0
-#else
-#define UART_NUM UART_NUM_1
-#endif
-#define BUF_SIZE (512)
-#define SERIAL_BUFFER_SIZE 512
-#define SERIAL_TASK_STACK_SIZE_INTERNAL 8192
-#define SERIAL_TASK_STACK_SIZE_PSRAM 8192
-#define SERIAL_TASK_USE_PSRAM_STACK 0
-
-#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
-#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
-#else
-#define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_INTERNAL
-#endif
-
-#if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
-static StackType_t *s_serial_task_stack = NULL;
-static StaticTask_t *s_serial_task_buffer = NULL;
-#endif
-
-#ifndef CONFIG_CONSOLE_UART_BAUDRATE
-#ifdef CONFIG_MONITOR_BAUD
-#define CONFIG_CONSOLE_UART_BAUDRATE CONFIG_MONITOR_BAUD
-#else
-#define CONFIG_CONSOLE_UART_BAUDRATE 115200
-#endif
-#endif
-
-EXT_RAM_BSS_ATTR static char serial_buffer[SERIAL_BUFFER_SIZE];
-static TaskHandle_t s_serial_task_handle = NULL;
-static bool s_serial_initialized = false;
-static bool s_uart_disabled = false; // disable main serial UART for certain templates
-static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
-
-#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
+  (void)ticks_to_wait;
   if (buf == NULL || len == 0) return 0;
-  fd_set readfds;
-  FD_ZERO(&readfds);
-  FD_SET(STDIN_FILENO, &readfds);
-  struct timeval tv = {
-    .tv_sec = ticks_to_wait / configTICK_RATE_HZ,
-    .tv_usec = (suseconds_t)(((ticks_to_wait % configTICK_RATE_HZ) * 1000000ULL) /
-                              configTICK_RATE_HZ),
-  };
-  int ret = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
-  if (ret <= 0 || !FD_ISSET(STDIN_FILENO, &readfds)) return 0;
+
+  // ESP-IDF owns the USB Serial/JTAG driver when it is the primary console.
+  // Read through its VFS/stdin instead of touching the low-level driver API.
   ssize_t n = read(STDIN_FILENO, buf, len);
   return n > 0 ? (int)n : 0;
 }
+
 static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to_wait) {
   (void)ticks_to_wait;
   if (buf == NULL || len == 0) return 0;
+
+  // stdout is the ESP-IDF USB Serial/JTAG VFS endpoint in this configuration.
   ssize_t n = write(STDOUT_FILENO, buf, len);
   return n > 0 ? (int)n : 0;
 }
@@ -107,6 +59,8 @@ static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to
   if (!usb_serial_jtag_is_driver_installed()) return 0;
   return usb_serial_jtag_write_bytes(buf, len, ticks_to_wait);
 }
+#endif
+
 #endif
 
 static bool serial_should_disable_uart(void) {
@@ -839,7 +793,7 @@ void serial_task(void *pvParameter) {
               cursor_position = index; // Move cursor to end
               // Echo the history command
               if (index > 0) {
-                uart_write_bytes(UART_NUM, history_cmd, index);
+                if (!s_uart_disabled) uart_write_bytes(UART_NUM, history_cmd, index);
 #if JTAG_SUPPORTED
                 serial_usb_write_bytes((const uint8_t*)history_cmd, index, 0);
 #endif
@@ -867,7 +821,7 @@ void serial_task(void *pvParameter) {
               cursor_position = index; // Move cursor to end
               // Echo the history command
               if (index > 0) {
-                uart_write_bytes(UART_NUM, history_cmd, index);
+                if (!s_uart_disabled) uart_write_bytes(UART_NUM, history_cmd, index);
 #if JTAG_SUPPORTED
                 serial_usb_write_bytes((const uint8_t*)history_cmd, index, 0);
 #endif
@@ -1009,6 +963,18 @@ void serial_task(void *pvParameter) {
 // Initialize the SerialManager
 void serial_manager_init() {
   s_uart_disabled = serial_should_disable_uart();
+#if defined(CONFIG_IDF_TARGET_ESP32C5) && defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  // C5 USB build: USB is the sole console transport. Do not install or poll
+  // UART0; keeping one owner of stdin/stdout removes the UART/USB race.
+  s_uart_disabled = true;
+  setvbuf(stdin, NULL, _IONBF, 0);
+  setvbuf(stdout, NULL, _IONBF, 0);
+  int in_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+  if (in_flags >= 0) {
+    (void)fcntl(STDIN_FILENO, F_SETFL, in_flags | O_NONBLOCK);
+  }
+  ESP_LOGI("SerialManager", "C5 USB-primary mode: UART0 disabled; stdio/VFS owns USB Serial/JTAG");
+#endif
 
   // UART configuration for main UART
   const uart_config_t uart_config = {
@@ -1105,7 +1071,9 @@ void serial_manager_deinit() {
 #if JTAG_SUPPORTED && !defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
   usb_serial_jtag_driver_uninstall();
 #endif
-  uart_driver_delete(UART_NUM);
+  if (!s_uart_disabled) {
+    uart_driver_delete(UART_NUM);
+  }
 
   if (commandQueue) {
     vQueueDelete(commandQueue);
