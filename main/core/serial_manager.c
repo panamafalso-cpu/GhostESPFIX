@@ -32,6 +32,8 @@
 #include <stdlib.h>
 #include <string.h>
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+#include <unistd.h>
+#include <sys/select.h>
 static int serial_usb_read_bytes(void *buf, uint32_t len, uint32_t ticks_to_wait) {
   (void)ticks_to_wait;
   if (buf == NULL || len == 0) return 0;
@@ -61,8 +63,6 @@ static int serial_usb_write_bytes(const void *buf, size_t len, uint32_t ticks_to
 }
 #endif
 
-#endif
-
 static bool serial_should_disable_uart(void) {
   return false;
 }
@@ -75,7 +75,7 @@ int serial_manager_write_bytes(const void *data, size_t len) {
   int written = 0;
 
   if (!s_uart_disabled && !s_uart_paused) {
-    written = serial_uart_write_bytes(UART_NUM, (const char *)data, (size_t)len);
+    written = uart_write_bytes(UART_NUM, (const char *)data, (size_t)len);
   }
 
 #if JTAG_SUPPORTED
