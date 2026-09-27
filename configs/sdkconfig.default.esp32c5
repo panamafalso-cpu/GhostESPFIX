@@ -3285,6 +3285,3 @@ CONFIG_SEMIHOSTFS_MAX_MOUNT_POINTS=1
 
 # CONFIG_ESP_WIFI_REMOTE_ENABLED is not set
 # CONFIG_ESP_HOSTED_ENABLED is not set
-
-# Keep USB Serial/JTAG connected while automatic power management is active.
-CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
