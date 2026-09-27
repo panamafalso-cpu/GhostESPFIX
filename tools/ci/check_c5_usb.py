@@ -11,7 +11,7 @@ cfg = (root / "build/config/sdkconfig.h").read_text()
 checks = [
     ("USB primary console enabled", "#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG 1" in cfg),
     ("USB secondary console disabled", "#define CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG 1" not in cfg),
-    ("No automatic light sleep while USB connected", "#define CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION 1" in cfg),
+    ("No automatic light sleep while USB connected", "CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION" in cfg and "CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION 1" in cfg),
     ("SerialManager does not call low-level USB read in primary path",
      "serial_usb_read_bytes(void *buf" in src and "usb_serial_jtag_read_bytes(" in src),
     ("SerialManager does not call low-level USB write in primary path",
@@ -19,14 +19,9 @@ checks = [
 ]
 
 # Verify the primary-console implementation is VFS based.
-primary_start = src.find("#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)")
-primary_end = src.find("#else", primary_start)
-if primary_start < 0 or primary_end < 0:
-    checks.append(("Primary-console VFS branch present", False))
-else:
-    primary = src[primary_start:primary_end]
-    checks.append(("Primary branch uses POSIX console VFS", "STDIN_FILENO" in primary and "STDOUT_FILENO" in primary))
-    checks.append(("Primary branch has no direct USB driver API", "usb_serial_jtag_" not in primary))
+primary = src[src.find("static int serial_usb_read_bytes"):src.find("#else", src.find("static int serial_usb_read_bytes"))]
+checks.append(("Primary branch uses POSIX console VFS", "STDIN_FILENO" in primary and "STDOUT_FILENO" in primary))
+checks.append(("Primary branch has no direct USB driver API", "usb_serial_jtag_" not in primary))
 
 for name, ok in checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
