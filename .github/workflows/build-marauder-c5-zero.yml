@@ -134,7 +134,7 @@ jobs:
           set -euxo pipefail
           mkdir -p build
           arduino-cli compile \
-            --fqbn 'esp32:esp32:waveshare_esp32_c5_zero:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=cdc' \
+            --fqbn 'esp32:esp32:esp32c5:FlashSize=4M,PartitionScheme=min_spiffs' \
             --warnings all \
             --build-property compiler.cpp.extra_flags='-DMARAUDER_C5_ZERO' \
             --libraries . \
