@@ -125,8 +125,8 @@ jobs:
           from pathlib import Path
           p = Path("SDInterface.cpp")
           s = p.read_text()
-          needle = "  }\\n}\\n\\nbool SDInterface::removeFile"
-          replacement = "  }\\n  return File();\\n}\\n\\nbool SDInterface::removeFile"
+          needle = "    return file;\\n  }\\n}\\n\\nbool SDInterface::removeFile"
+          replacement = "    return file;\\n  }\\n  return File();\\n}\\n\\nbool SDInterface::removeFile"
           if needle not in s:
               raise SystemExit("Expected SDInterface::getFile return path not found")
           p.write_text(s.replace(needle, replacement, 1))
