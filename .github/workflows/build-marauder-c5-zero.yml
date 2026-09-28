@@ -126,6 +126,39 @@ jobs:
           sed -i '218i\\  return File();' SDInterface.cpp
           # Pinned Marauder commit: line 2190 is the fallback of clearList().
           sed -i '2190i\\  return num_cleared;' WiFiScan.cpp
+          # Make header-owned globals conform to the C++ one-definition rule.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f"Expected text not found in {path}: {old!r}")
+              p.write_text(s.replace(old, new, 1))
+
+          replace("EvilPortal.h",
+                  '  char index_html[MAX_HTML_SIZE] = "TEST";',
+                  '  extern char index_html[MAX_HTML_SIZE];')
+          replace("EvilPortal.cpp",
+                  'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n',
+                  'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif\\n')
+          replace("WiFiScan.h",
+                  'bool connectionPending = false;',
+                  'extern bool connectionPending;')
+          replace("WiFiScan.h",
+                  'bool operationInProgress = false;',
+                  'extern bool operationInProgress;')
+          replace("WiFiScan.cpp",
+                  'extern "C" int ieee80211_raw_frame_sanity_check',
+                  'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check')
+          replace("WiFiScan.cpp",
+                  'int num_probe = 0;\\n',
+                  'int num_probe = 0;\\n#ifdef HAS_BT\\nbool connectionPending = false;\\nbool operationInProgress = false;\\n#endif\\n')
+          replace("esp32_marauder.ino",
+                  '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#endif',
+                  '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#elif defined(MARAUDER_C5_ZERO)\\n  SDInterface sd_obj;\\n#endif')
+          PY
 
       - name: Validate C5-Zero safety invariants
         working-directory: marauder
@@ -145,7 +178,7 @@ jobs:
           arduino-cli compile \
             --fqbn 'esp32:esp32:esp32c5:FlashSize=4M,PartitionScheme=min_spiffs' \
             --warnings all \
-            --build-property compiler.cpp.extra_flags='-DMARAUDER_C5_ZERO -Wno-error=return-type' \
+            --build-property compiler.cpp.extra_flags='-DMARAUDER_C5_ZERO -Wno-error=return-type -DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1' \
             --libraries . \
             --libraries CustomESP32Ping \
             --libraries CustomAsyncTCP \
