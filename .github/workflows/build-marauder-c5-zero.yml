@@ -124,6 +124,8 @@ jobs:
           # Pinned Marauder commit: line 218 is the closing brace of getFile().
           # Add the missing fallback return so Arduino-ESP32's -Werror=return-type passes.
           sed -i '218i\\  return File();' SDInterface.cpp
+          # Pinned Marauder commit: line 2190 is the fallback of clearList().
+          sed -i '2190i\\  return num_cleared;' WiFiScan.cpp
 
       - name: Validate C5-Zero safety invariants
         working-directory: marauder
