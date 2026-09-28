@@ -1,0 +1,214 @@
+name: Build Marauder for Waveshare ESP32-C5-Zero
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - marauder-c5-zero
+
+permissions:
+  contents: read
+
+env:
+  MARAUDER_REF: 8ae4622abcc9c9c5729d4e97491907581d7f0c34
+  ARDUINO_ESP32_VERSION: 3.3.10
+  MAX_APP_SIZE: 1966080
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout build harness
+        uses: actions/checkout@v4
+
+      - name: Checkout upstream ESP32 Marauder
+        uses: actions/checkout@v4
+        with:
+          repository: justcallmekoko/ESP32Marauder
+          ref: ${{ env.MARAUDER_REF }}
+          path: marauder
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Arduino CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          arduino-cli version
+
+      - name: Install ESP32 Arduino core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@${{ env.ARDUINO_ESP32_VERSION }}
+          arduino-cli core list
+
+      - name: Install Marauder libraries
+        run: |
+          set -eux
+          git clone --depth 1 --branch 1.6 https://github.com/marian-craciunescu/ESP32Ping.git CustomESP32Ping
+          git clone --depth 1 --branch v3.4.8 https://github.com/ESP32Async/AsyncTCP.git CustomAsyncTCP
+          git clone --depth 1 --branch v2.0.6 https://github.com/stevemarple/MicroNMEA.git CustomMicroNMEA
+          git clone --depth 1 --branch v3.8.1 https://github.com/ESP32Async/ESPAsyncWebServer.git CustomESPAsyncWebServer
+          git clone --depth 1 --branch v2.5.34 https://github.com/Bodmer/TFT_eSPI.git CustomTFT_eSPI
+          git clone --depth 1 --branch v1.4 https://github.com/PaulStoffregen/XPT2046_Touchscreen.git CustomXPT2046_Touchscreen
+          git clone --depth 1 --branch 3.0.0 https://github.com/lvgl/lv_arduino.git Customlv_arduino
+          git clone --depth 1 --branch 1.8.0 https://github.com/Bodmer/JPEGDecoder.git CustomJPEGDecoder
+          git clone --depth 1 --branch 2.3.8 https://github.com/h2zero/NimBLE-Arduino.git CustomNimBLE-Arduino
+          git clone --depth 1 --branch 1.12.0 https://github.com/adafruit/Adafruit_NeoPixel.git CustomAdafruit_NeoPixel
+          git clone --depth 1 --branch v6.18.2 https://github.com/bblanchon/ArduinoJson.git CustomArduinoJson
+          git clone --depth 1 --branch v1.3.3 https://github.com/ivanseidel/LinkedList.git CustomLinkedList
+          git clone --depth 1 --branch 8.1.0 https://github.com/plerup/espsoftwareserial.git CustomEspSoftwareSerial
+          git clone --depth 1 --branch 1.15.0 https://github.com/adafruit/Adafruit_BusIO.git CustomAdafruit_BusIO
+          git clone --depth 1 --branch 1.0.2 https://github.com/adafruit/Adafruit_MAX1704X.git CustomAdafruit_MAX1704X
+          cp -r marauder/libraries/Adafruit_TCA8418 CustomAdafruit_TCA8418
+          rm -f CustomTFT_eSPI/User_Setup_Select.h
+          cp marauder/User*.h CustomTFT_eSPI/
+
+      - name: Patch Marauder for C5-Zero hardware
+        working-directory: marauder
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("esp32_marauder/configs.h")
+          s = p.read_text()
+
+          # Add a dedicated target name without modifying the upstream C5 target.
+          s = s.replace(
+              "  //#define MARAUDER_C5\n",
+              "  //#define MARAUDER_C5\n  //#define MARAUDER_C5_ZERO\n",
+              1,
+          )
+
+          s = s.replace(
+              '  #elif defined(MARAUDER_C5)\n    #define HARDWARE_NAME "ESP32-C5 DevKit"\n',
+              '  #elif defined(MARAUDER_C5)\n    #define HARDWARE_NAME "ESP32-C5 DevKit"\n  #elif defined(MARAUDER_C5_ZERO)\n    #define HARDWARE_NAME "Waveshare ESP32-C5-Zero"\n',
+              1,
+          )
+
+          old = '''  #ifdef MARAUDER_T_DONGLE_C5\n'''
+          new = '''  #ifdef MARAUDER_C5_ZERO\n    #define HAS_BT\n    #define HAS_NEOPIXEL_LED\n    #define HAS_DUAL_BAND\n    #define HAS_NIMBLE_2\n    #define HAS_IDF_3\n    #define HAS_DIRECT_UPLOAD\n    // Intentionally no HAS_GPS/HAS_SD/HAS_C5_SD: this board has no GPS/SD,\n    // and GPIO13/14 are the native USB D-/D+ pins on the Waveshare board.\n  #endif\n  #ifdef MARAUDER_T_DONGLE_C5\n'''
+          if old not in s:
+              raise SystemExit("C5 feature insertion point not found")
+          s = s.replace(old, new, 1)
+
+          s = s.replace(
+              '    #elif defined(MARAUDER_C5)\n      #define PIN 27\n',
+              '    #elif defined(MARAUDER_C5) || defined(MARAUDER_C5_ZERO)\n      #define PIN 27\n',
+              1,
+          )
+
+          # The upstream C5 GPS block explicitly assigns UART1 to GPIO13/14.
+          # Verify our new target is not accidentally added to that block.
+          block_start = s.index("  //// GPS STUFF")
+          block_end = s.index("  //// END GPS STUFF", block_start)
+          gps_block = s[block_start:block_end]
+          if "MARAUDER_C5_ZERO" in gps_block:
+              raise SystemExit("C5-Zero must never enter Marauder's GPS/USB-pin block")
+
+          p.write_text(s)
+          PY
+
+          grep -n -A12 -B3 "MARAUDER_C5_ZERO" esp32_marauder/configs.h
+
+      - name: Validate C5-Zero safety invariants
+        working-directory: marauder
+        run: |
+          set -euo pipefail
+          # USB D-/D+ on the C5 are GPIO13/GPIO14. The C5-Zero target must not
+          # enable Marauder's GPS UART mapping on those pins.
+          ! awk '/MARAUDER_C5_ZERO/{f=1} f && /HAS_GPS|HAS_C5_SD|HAS_SD/{bad=1} f && /#endif/{if (bad) exit 1; f=0; bad=0}' esp32_marauder/configs.h
+          ! sed -n '///// GPS STUFF/,///// END GPS STUFF/p' esp32_marauder/configs.h | grep -q 'MARAUDER_C5_ZERO'
+          grep -q '#define PIN 27' esp32_marauder/configs.h
+          echo "C5-Zero target: no GPS/SD features; onboard RGB LED: GPIO27"
+
+      - name: Compile Marauder C5-Zero (4 MB, native USB CDC)
+        run: |
+          set -euxo pipefail
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn 'esp32:esp32:waveshare_esp32_c5_zero:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=cdc' \
+            --warnings all \
+            --build-property compiler.cpp.extra_flags='-DMARAUDER_C5_ZERO' \
+            --libraries . \
+            --libraries CustomESP32Ping \
+            --libraries CustomAsyncTCP \
+            --libraries CustomMicroNMEA \
+            --libraries CustomESPAsyncWebServer \
+            --libraries CustomTFT_eSPI \
+            --libraries CustomXPT2046_Touchscreen \
+            --libraries Customlv_arduino \
+            --libraries CustomJPEGDecoder \
+            --libraries CustomNimBLE-Arduino \
+            --libraries CustomAdafruit_NeoPixel \
+            --libraries CustomArduinoJson \
+            --libraries CustomLinkedList \
+            --libraries CustomEspSoftwareSerial \
+            --libraries CustomAdafruit_BusIO \
+            --libraries CustomAdafruit_MAX1704X \
+            --libraries CustomAdafruit_TCA8418 \
+            --output-dir build \
+            marauder/esp32_marauder/esp32_marauder.ino
+
+      - name: Verify app fits the 4 MB C5-Zero partition
+        run: |
+          set -euo pipefail
+          BIN="build/esp32_marauder.ino.bin"
+          test -f "$BIN"
+          SIZE=$(stat -c%s "$BIN")
+          LIMIT=${{ env.MAX_APP_SIZE }}
+          FREE=$((LIMIT-SIZE))
+          echo "App binary: $SIZE bytes"
+          echo "Partition limit: $LIMIT bytes"
+          echo "Free headroom: $FREE bytes"
+          if [ "$SIZE" -ge "$LIMIT" ]; then
+            echo "::error::Marauder C5-Zero app does not fit in the 1.875 MiB min_spiffs app slot."
+            exit 1
+          fi
+          python3 - <<PY
+          size=$SIZE
+          limit=$LIMIT
+          print(f"Usage: {size/limit*100:.2f}%")
+          print(f"Free: {limit-size} bytes ({(limit-size)/1024:.1f} KiB)")
+          PY
+
+      - name: Locate flash files and create manifest
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          cp build/esp32_marauder.ino.bin artifact/marauder_c5_zero.bin
+          find build -maxdepth 2 -type f \( -name 'bootloader.bin' -o -name '*partitions*.bin' -o -name 'boot_app0.bin' -o -name 'flash_args' \) -print
+          BOOT=$(find build -type f -name bootloader.bin | head -n1)
+          PART=$(find build -type f -name '*partitions*.bin' | head -n1)
+          BOOTAPP=$(find build -type f -name boot_app0.bin | head -n1 || true)
+          test -n "$BOOT"
+          test -n "$PART"
+          cp "$BOOT" artifact/bootloader.bin
+          cp "$PART" artifact/partitions.bin
+          if [ -n "$BOOTAPP" ]; then cp "$BOOTAPP" artifact/boot_app0.bin; fi
+          cat > artifact/README.txt <<'EOF'
+          Waveshare ESP32-C5-Zero / ESP32-C5 Marauder build
+          Flash size: 4 MB
+          Target: waveshare_esp32_c5_zero
+          Native USB CDC: enabled
+          GPS: disabled (GPIO13/14 reserved for USB)
+          SD: disabled (board has no SD)
+          RGB LED: GPIO27
+          Application offset: 0x10000
+          Partition table offset: 0x8000
+          Do not use the official 8 MB C5 Marauder binary on this 4 MB board.
+          EOF
+          sha256sum artifact/* > artifact/SHA256SUMS.txt
+
+      - name: Upload C5-Zero firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: marauder-c5-zero-4mb
+          path: artifact/
+          retention-days: 14
