@@ -113,6 +113,34 @@ jobs:
           if "MARAUDER_C5_ZERO" in gps_block:
               raise SystemExit("C5-Zero must never enter Marauder's GPS/USB-pin block")
 
+          # Arduino-ESP32 3.x treats return-type diagnostics as errors.
+          # Upstream SDInterface::getFile() has a missing return path; SD is disabled
+          # for C5-Zero, but the translation unit is still compiled.
+          sd = Path("SDInterface.cpp")
+          sd_s = sd.read_text()
+          old_sd = """  if (this->supported) {
+    File file = SD.open(path, FILE_READ);
+
+    //if (file)
+    return file;
+  }
+}
+
+"""
+          new_sd = """  if (this->supported) {
+    File file = SD.open(path, FILE_READ);
+
+    //if (file)
+    return file;
+  }
+  return File();
+}
+
+"""
+          if old_sd not in sd_s:
+              raise SystemExit("Expected SDInterface::getFile() body not found")
+          sd.write_text(sd_s.replace(old_sd, new_sd, 1))
+
           p.write_text(s)
           PY
 
