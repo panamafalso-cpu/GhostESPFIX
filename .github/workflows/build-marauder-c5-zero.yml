@@ -140,9 +140,18 @@ jobs:
           replace("EvilPortal.h",
                   '  char index_html[MAX_HTML_SIZE] = "TEST";',
                   '  extern char index_html[MAX_HTML_SIZE];')
-          replace("EvilPortal.cpp",
-                  'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n',
-                  'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif\\n')
+
+          # Define index_html in exactly one translation unit on non-PSRAM boards.
+          # Use a line-based replacement so this remains stable if upstream spacing changes.
+          p = Path("EvilPortal.cpp")
+          s = p.read_text()
+          marker = 'char apName[MAX_AP_NAME_SIZE] = "PORTAL";'
+          definition = 'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif'
+          if marker not in s:
+              raise SystemExit("EvilPortal.cpp: apName definition not found")
+          s = s.replace(marker, definition, 1)
+          p.write_text(s)
+
           replace("WiFiScan.h",
                   'bool connectionPending = false;',
                   'extern bool connectionPending;')
@@ -152,9 +161,16 @@ jobs:
           replace("WiFiScan.cpp",
                   'extern "C" int ieee80211_raw_frame_sanity_check',
                   'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check')
-          replace("WiFiScan.cpp",
-                  'int num_probe = 0;\\n',
-                  'int num_probe = 0;\\n#ifdef HAS_BT\\nbool connectionPending = false;\\nbool operationInProgress = false;\\n#endif\\n')
+
+          # Move the HAS_BT state definitions out of the header into the .cpp.
+          p = Path("WiFiScan.cpp")
+          s = p.read_text()
+          marker = 'int num_probe = 0;'
+          definitions = 'int num_probe = 0;\\n#ifdef HAS_BT\\nbool connectionPending = false;\\nbool operationInProgress = false;\\n#endif'
+          if marker not in s:
+              raise SystemExit("WiFiScan.cpp: num_probe definition not found")
+          s = s.replace(marker, definitions, 1)
+          p.write_text(s)
           replace("esp32_marauder.ino",
                   '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#endif',
                   '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#elif defined(MARAUDER_C5_ZERO)\\n  SDInterface sd_obj;\\n#endif')
