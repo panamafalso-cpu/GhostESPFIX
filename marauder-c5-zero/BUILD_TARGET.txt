@@ -1,0 +1,1 @@
+Waveshare ESP32-C5-Zero target: 4 MB flash, native USB CDC, GPS/SD disabled because GPIO13/14 are USB and the board has no GPS/SD. Upstream Marauder is patched only at build time.
