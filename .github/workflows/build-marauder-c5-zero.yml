@@ -56,7 +56,7 @@ jobs:
           git clone --depth 1 --branch v3.4.8 https://github.com/ESP32Async/AsyncTCP.git CustomAsyncTCP
           git clone --depth 1 --branch v2.0.6 https://github.com/stevemarple/MicroNMEA.git CustomMicroNMEA
           git clone --depth 1 --branch v3.8.1 https://github.com/ESP32Async/ESPAsyncWebServer.git CustomESPAsyncWebServer
-          git clone --depth 1 --branch v2.5.34 https://github.com/Bodmer/TFT_eSPI.git CustomTFT_eSPI
+          git clone --depth 1 --branch V2.5.34 https://github.com/Bodmer/TFT_eSPI.git CustomTFT_eSPI
           git clone --depth 1 --branch v1.4 https://github.com/PaulStoffregen/XPT2046_Touchscreen.git CustomXPT2046_Touchscreen
           git clone --depth 1 --branch 3.0.0 https://github.com/lvgl/lv_arduino.git Customlv_arduino
           git clone --depth 1 --branch 1.8.0 https://github.com/Bodmer/JPEGDecoder.git CustomJPEGDecoder
