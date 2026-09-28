@@ -118,6 +118,13 @@ jobs:
 
           grep -n -A12 -B3 "MARAUDER_C5_ZERO" esp32_marauder/configs.h
 
+      - name: Fix upstream SDInterface return-type diagnostic
+        working-directory: marauder/esp32_marauder
+        run: |
+          # Pinned Marauder commit: line 218 is the closing brace of getFile().
+          # Add the missing fallback return so Arduino-ESP32's -Werror=return-type passes.
+          sed -i '218i\\  return File();' SDInterface.cpp
+
       - name: Validate C5-Zero safety invariants
         working-directory: marauder
         run: |
