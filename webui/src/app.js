@@ -479,6 +479,7 @@ function showPage(page) {
   );
   if (isSame && state.activeAction) closeAction();
   if (page === 'files') loadFiles();
+  if (page === 'settings') loadSettings().catch(() => {});
   if (page === 'dashboard') renderDashboard();
   if (page === 'badusb') {
     badusbRefreshScripts(false);
