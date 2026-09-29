@@ -1,8 +1,8 @@
-name: C5 TEST - USB Serial-JTAG primary
+name: C5 USB direct-stable build
 
 on:
   push:
-    branches: [test-usb-primary-c5, c5-usb-direct-stable]
+    branches: [c5-usb-direct-stable]
   workflow_dispatch:
 
 permissions:
@@ -47,7 +47,7 @@ jobs:
           rm -f sdkconfig sdkconfig.defaults
           cp configs/sdkconfig.default.esp32c5 sdkconfig.defaults
           cp configs/sdkconfig.default.esp32c5 sdkconfig
-          printf "\n# TEST: USB Serial-JTAG primary console\n" >> sdkconfig.defaults
+          printf "\n# C5 direct-stable USB Serial-JTAG build\n" >> sdkconfig.defaults
           printf "# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig.defaults
           printf "# CONFIG_ESP_GDBSTUB_ENABLED is not set\n" >> sdkconfig.defaults
           printf "# CONFIG_FATFS_USE_DYN_BUFFERS is not set\n" >> sdkconfig
