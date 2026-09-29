@@ -129,91 +129,106 @@ jobs:
           def replace_once(path, pattern, replacement):
               p = Path(path)
               s = p.read_text()
-              s2, n = re.subn(pattern, replacement, s, count=1, flags=re.M)
+              s2, n = re.subn(pattern, replacement, s, count=1, flags=re.M | re.S)
               if n != 1:
                   raise SystemExit(f"Expected one match in {path}: {pattern!r}")
               p.write_text(s2)
 
-          # Fix upstream methods whose non-SD builds fall through without returning.
+          # 1) SDInterface::getFile() must return an empty File on non-SD builds.
           p = Path("SDInterface.cpp")
           s = p.read_text()
-          old_sd = """File SDInterface::getFile(String path) {
-            if (this->supported) {
-              File file = SD.open(path, FILE_READ);
+          if "return File();" not in s:
+              m = re.search(
+                  r'(File\\s+SDInterface::getFile\\(String path\\)\\s*\\{.*?)(\\n\\})',
+                  s,
+                  re.M | re.S,
+              )
+              if not m:
+                  raise SystemExit("Could not locate SDInterface::getFile(String path)")
+              body = m.group(1)
+              if "return File();" not in body:
+                  s = s[:m.start(2)] + "\\n  return File();" + s[m.start(2):]
+                  p.write_text(s)
 
-              //if (file)
-              return file;
-            }
-          }"""
-          new_sd = """File SDInterface::getFile(String path) {
-            if (this->supported) {
-              File file = SD.open(path, FILE_READ);
-
-              //if (file)
-              return file;
-            }
-            return File();
-          }"""
-          if old_sd not in s:
-              raise SystemExit("Could not locate SDInterface::getFile(String path)")
-          p.write_text(s.replace(old_sd, new_sd, 1))
-
+          # 2) WiFiScan::clearList() must return its count on every path.
           p = Path("WiFiScan.cpp")
           s = p.read_text()
-          if "return num_cleared;" not in s:
-              m = re.search(r'(int\s+WiFiScan::clearList\s*\(uint8_t\s+list_type\)\s*\{.*?)(\n\})', s, re.M | re.S)
-              if not m:
-                  raise SystemExit("Could not locate WiFiScan::clearList(uint8_t list_type)")
-              s = s[:m.start(2)] + "\n  return num_cleared;" + s[m.start(2):]
+          m = re.search(
+              r'(int\\s+WiFiScan::clearList\\(uint8_t\\s+list_type\\)\\s*\\{)(.*?)(\\n\\})',
+              s,
+              re.M | re.S,
+          )
+          if not m:
+              raise SystemExit("Could not locate WiFiScan::clearList(uint8_t list_type)")
+          if "return num_cleared;" not in m.group(2):
+              s = s[:m.start(3)] + "\\n  return num_cleared;" + s[m.start(3):]
               p.write_text(s)
 
-          # One-definition-rule fixes: declarations in headers, definitions in .cpp.
-          replace_once(
-              "EvilPortal.h",
-              r'^\s*char index_html\[MAX_HTML_SIZE\] = "TEST";\s*$',
+          # 3) Avoid multiple definitions of the non-PSRAM EvilPortal HTML buffer.
+          p = Path("EvilPortal.h")
+          s = p.read_text()
+          s2, n = re.subn(
+              r'^\\s*char index_html\\[MAX_HTML_SIZE\\] = "TEST";\\s*$',
               'extern char index_html[MAX_HTML_SIZE];',
+              s,
+              count=1,
+              flags=re.M,
           )
-          replace_once(
-              "EvilPortal.cpp",
-              r'^char apName\[MAX_AP_NAME_SIZE\] = "PORTAL";\s*$',
-              'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif',
-          )
-          replace_once(
-              "WiFiScan.h",
-              r'^\s*bool connectionPending = false;\s*$',
-              'extern bool connectionPending;',
-          )
-          replace_once(
-              "WiFiScan.h",
-              r'^\s*bool operationInProgress = false;\s*$',
-              'extern bool operationInProgress;',
-          )
-          replace_once(
-              "WiFiScan.cpp",
-              r'extern "C" int ieee80211_raw_frame_sanity_check',
-              'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check',
-          )
-          replace_once(
-              "WiFiScan.cpp",
-              r'^int num_probe = 0;\s*$',
-              'int num_probe = 0;\\n#ifdef HAS_BT\\nbool connectionPending = false;\\nbool operationInProgress = false;\\n#endif',
-          )
+          if n == 1:
+              p.write_text(s2)
 
-          # C5-Zero has no SD controller, but EvilPortal's header expects sd_obj.
-          ino = Path("esp32_marauder.ino")
-          s = ino.read_text()
-          needle = '#if defined(HAS_SD) && !defined(HAS_C5_SD)\n  SDInterface sd_obj;\n#endif'
-          repl = '#if defined(HAS_SD) && !defined(HAS_C5_SD)\n  SDInterface sd_obj;\n#elif defined(MARAUDER_C5_ZERO)\n  SDInterface sd_obj;\n#endif'
-          if "elif defined(MARAUDER_C5_ZERO)" not in s:
-              if needle not in s:
-                  raise SystemExit("Could not locate global SDInterface declaration")
-              ino.write_text(s.replace(needle, repl, 1))
+          p = Path("EvilPortal.cpp")
+          s = p.read_text()
+          if "char index_html[MAX_HTML_SIZE] = \\"TEST\\";" not in s:
+              marker = 'char apName[MAX_AP_NAME_SIZE] = "PORTAL";'
+              if marker not in s:
+                  raise SystemExit("Could not locate EvilPortal apName definition")
+              s = s.replace(
+                  marker,
+                  marker + '\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif',
+                  1,
+              )
+              p.write_text(s)
+
+          # 4) These BLE state variables are definitions in WiFiScan.cpp,
+          #    declarations in WiFiScan.h. Make the header unambiguously extern.
+          p = Path("WiFiScan.h")
+          s = p.read_text()
+          s = re.sub(
+              r'^\\s*bool connectionPending = false;\\s*$',
+              'extern bool connectionPending;',
+              s,
+              count=1,
+              flags=re.M,
+          )
+          s = re.sub(
+              r'^\\s*bool operationInProgress = false;\\s*$',
+              'extern bool operationInProgress;',
+              s,
+              count=1,
+              flags=re.M,
+          )
+          p.write_text(s)
+
+          # 5) Keep the raw-frame hook weak so Arduino/IDF does not get an
+          #    unavoidable multiple-definition conflict on C5.
+          p = Path("WiFiScan.cpp")
+          s = p.read_text()
+          s = s.replace(
+              'extern "C" int ieee80211_raw_frame_sanity_check',
+              'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check',
+              1,
+          )
+          p.write_text(s)
+
+          # C5-Zero has no SD controller. Do NOT manufacture an sd_obj here:
+          # EvilPortal/SD code is already guarded by HAS_SD, and this keeps the
+          # target free of an unnecessary SDInterface global.
+          print("C5-Zero source patching completed.")
           PY
 
           grep -n -A5 -B2 'index_html\\[MAX_HTML_SIZE\\]' EvilPortal.h EvilPortal.cpp
           grep -n -A4 -B4 'connectionPending' WiFiScan.h WiFiScan.cpp
-          grep -n -A5 -B3 'MARAUDER_C5_ZERO' esp32_marauder.ino
-
       - name: Validate C5-Zero safety invariants
         working-directory: marauder
         run: |
