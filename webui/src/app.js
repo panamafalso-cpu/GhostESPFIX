@@ -1287,17 +1287,20 @@ async function refreshAll() {
   const refreshBtn = document.querySelector('[data-refresh]');
   setLoading(refreshBtn, true);
   try {
-    const [settingsResult, commResult, logsResult] = await Promise.allSettled([loadSettings(), loadCommStatus(), refreshLogs(false)]);
-    loadFiles(false).catch(() => {});
-    if ([settingsResult, commResult, logsResult].some(result => result.status === 'rejected')) {
-      throw new Error('core API unavailable');
-    }
+    // Fast path: the logs endpoint is enough to establish that the WebUI is alive.
+    // Do not block first paint on settings, SD-card enumeration, or GhostLink status.
+    await refreshLogs(false);
     $('api-dot').className = 'dot good';
     $('api-status').textContent = 'Connected';
     renderDashboard();
+    populateDashboardIfStale();
+
+    // Secondary data loads in the background after the UI is already usable.
+    loadCommStatus().catch(() => {});
   } catch (e) {
     $('api-dot').className = 'dot bad';
     $('api-status').textContent = 'Disconnected';
+    throw e;
   } finally {
     setLoading(refreshBtn, false);
   }
@@ -1957,8 +1960,8 @@ function init() {
     refreshLogs(false).then(pollPeerResponses).catch(() => {});
     if (document.querySelector('#page-dashboard.active')) renderDashboard();
     populateDashboardIfStale();
-  }, 2000);
-  setInterval(() => loadCommStatus().catch(() => {}), 1500);
+  }, 4000);
+  setInterval(() => loadCommStatus().catch(() => {}), 4000);
 }
 
 init();
