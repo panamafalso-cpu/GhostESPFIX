@@ -168,19 +168,36 @@ jobs:
               p.write_text(s)
 
           # One-definition-rule fixes: declarations in headers, definitions in .cpp.
-          replace_once("EvilPortal.h",
-                       r'^\s*char index_html\[MAX_HTML_SIZE\] = "TEST";\s*
-          replace_once("EvilPortal.cpp",
-                       r'^char apName\[MAX_AP_NAME_SIZE\] = "PORTAL";\s*
-          replace_once("WiFiScan.h",
-                       r'^\s*bool connectionPending = false;\s*
-          replace_once("WiFiScan.h",
-                       r'^\s*bool operationInProgress = false;\s*
-          replace_once("WiFiScan.cpp",
-                       r'extern "C" int ieee80211_raw_frame_sanity_check',
-                       'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check')
-          replace_once("WiFiScan.cpp",
-                       r'^int num_probe = 0;\s*
+          replace_once(
+              "EvilPortal.h",
+              r'^\s*char index_html\[MAX_HTML_SIZE\] = "TEST";\s*$',
+              'extern char index_html[MAX_HTML_SIZE];',
+          )
+          replace_once(
+              "EvilPortal.cpp",
+              r'^char apName\[MAX_AP_NAME_SIZE\] = "PORTAL";\s*$',
+              'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif',
+          )
+          replace_once(
+              "WiFiScan.h",
+              r'^\s*bool connectionPending = false;\s*$',
+              'extern bool connectionPending;',
+          )
+          replace_once(
+              "WiFiScan.h",
+              r'^\s*bool operationInProgress = false;\s*$',
+              'extern bool operationInProgress;',
+          )
+          replace_once(
+              "WiFiScan.cpp",
+              r'extern "C" int ieee80211_raw_frame_sanity_check',
+              'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check',
+          )
+          replace_once(
+              "WiFiScan.cpp",
+              r'^int num_probe = 0;\s*$',
+              'int num_probe = 0;\\n#ifdef HAS_BT\\nbool connectionPending = false;\\nbool operationInProgress = false;\\n#endif',
+          )
 
           # C5-Zero has no SD controller, but EvilPortal's header expects sd_obj.
           ino = Path("esp32_marauder.ino")
