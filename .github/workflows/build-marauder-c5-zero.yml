@@ -118,63 +118,75 @@ jobs:
 
           grep -n -A12 -B3 "MARAUDER_C5_ZERO" esp32_marauder/configs.h
 
-      - name: Fix upstream SDInterface return-type diagnostic
+      - name: Fix upstream diagnostics and C5-Zero globals
         working-directory: marauder/esp32_marauder
         run: |
-          # Pinned Marauder commit: line 218 is the closing brace of getFile().
-          # Add the missing fallback return so Arduino-ESP32's -Werror=return-type passes.
-          sed -i '218i\\  return File();' SDInterface.cpp
-          # Pinned Marauder commit: line 2190 is the fallback of clearList().
-          sed -i '2190i\\  return num_cleared;' WiFiScan.cpp
-          # Make header-owned globals conform to the C++ one-definition rule.
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
-          def replace(path, old, new):
+          def replace_once(path, pattern, replacement):
               p = Path(path)
               s = p.read_text()
-              if old not in s:
-                  raise SystemExit(f"Expected text not found in {path}: {old!r}")
-              p.write_text(s.replace(old, new, 1))
+              s2, n = re.subn(pattern, replacement, s, count=1, flags=re.M)
+              if n != 1:
+                  raise SystemExit(f"Expected one match in {path}: {pattern!r}")
+              p.write_text(s2)
 
-          replace("EvilPortal.h",
-                  '  char index_html[MAX_HTML_SIZE] = "TEST";',
-                  '  extern char index_html[MAX_HTML_SIZE];')
-
-          # Define index_html in exactly one translation unit on non-PSRAM boards.
-          # Use a line-based replacement so this remains stable if upstream spacing changes.
-          p = Path("EvilPortal.cpp")
+          # Avoid brittle line numbers for the two upstream return-type fixes.
+          p = Path("SDInterface.cpp")
           s = p.read_text()
-          marker = 'char apName[MAX_AP_NAME_SIZE] = "PORTAL";'
-          definition = 'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif'
-          if marker not in s:
-              raise SystemExit("EvilPortal.cpp: apName definition not found")
-          s = s.replace(marker, definition, 1)
-          p.write_text(s)
+          if "return File();" not in s:
+              m = re.search(r'(^File\\s+SDInterface::getFile\\s*\\([^)]*\\)\\s*\\{.*?)(^\\})', s, re.M | re.S)
+              if not m:
+                  raise SystemExit("Could not locate SDInterface::getFile()")
+              s = s[:m.start(2)] + "  return File();\\n" + s[m.start(2):]
+              p.write_text(s)
 
-          replace("WiFiScan.h",
-                  'bool connectionPending = false;',
-                  'extern bool connectionPending;')
-          replace("WiFiScan.h",
-                  'bool operationInProgress = false;',
-                  'extern bool operationInProgress;')
-          replace("WiFiScan.cpp",
-                  'extern "C" int ieee80211_raw_frame_sanity_check',
-                  'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check')
-
-          # Move the HAS_BT state definitions out of the header into the .cpp.
           p = Path("WiFiScan.cpp")
           s = p.read_text()
-          marker = 'int num_probe = 0;'
-          definitions = 'int num_probe = 0;\\n#ifdef HAS_BT\\nbool connectionPending = false;\\nbool operationInProgress = false;\\n#endif'
-          if marker not in s:
-              raise SystemExit("WiFiScan.cpp: num_probe definition not found")
-          s = s.replace(marker, definitions, 1)
-          p.write_text(s)
-          replace("esp32_marauder.ino",
-                  '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#endif',
-                  '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#elif defined(MARAUDER_C5_ZERO)\\n  SDInterface sd_obj;\\n#endif')
+          if "return num_cleared;" not in s:
+              m = re.search(r'(^int\\s+WiFiScan::clearList\\s*\\([^)]*\\)\\s*\\{.*?)(^\\})', s, re.M | re.S)
+              if not m:
+                  raise SystemExit("Could not locate WiFiScan::clearList()")
+              s = s[:m.start(2)] + "  return num_cleared;\\n" + s[m.start(2):]
+              p.write_text(s)
+
+          # One-definition-rule fixes: declarations in headers, definitions in .cpp.
+          replace_once("EvilPortal.h",
+                       r'^\\s*char index_html\\[MAX_HTML_SIZE\\] = "TEST";\\s*$',
+                       'extern char index_html[MAX_HTML_SIZE];')
+          replace_once("EvilPortal.cpp",
+                       r'^char apName\\[MAX_AP_NAME_SIZE\\] = "PORTAL";\\s*$',
+                       'char apName[MAX_AP_NAME_SIZE] = "PORTAL";\\n#ifndef HAS_PSRAM\\nchar index_html[MAX_HTML_SIZE] = "TEST";\\n#endif')
+          replace_once("WiFiScan.h",
+                       r'^\\s*bool connectionPending = false;\\s*$',
+                       'extern bool connectionPending;')
+          replace_once("WiFiScan.h",
+                       r'^\\s*bool operationInProgress = false;\\s*$',
+                       'extern bool operationInProgress;')
+          replace_once("WiFiScan.cpp",
+                       r'extern "C" int ieee80211_raw_frame_sanity_check',
+                       'extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check')
+          replace_once("WiFiScan.cpp",
+                       r'^int num_probe = 0;\\s*$',
+                       'int num_probe = 0;\\n#ifdef HAS_BT\\nbool connectionPending = false;\\nbool operationInProgress = false;\\n#endif')
+
+          # C5-Zero has no SD controller, but EvilPortal's header expects sd_obj.
+          ino = Path("esp32_marauder.ino")
+          s = ino.read_text()
+          needle = '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#endif'
+          repl = '#if defined(HAS_SD) && !defined(HAS_C5_SD)\\n  SDInterface sd_obj;\\n#elif defined(MARAUDER_C5_ZERO)\\n  SDInterface sd_obj;\\n#endif'
+          if "elif defined(MARAUDER_C5_ZERO)" not in s:
+              if needle not in s:
+                  raise SystemExit("Could not locate global SDInterface declaration")
+              ino.write_text(s.replace(needle, repl, 1))
           PY
+
+          grep -n -A5 -B2 'index_html\\[MAX_HTML_SIZE\\]' EvilPortal.h EvilPortal.cpp
+          grep -n -A4 -B4 'connectionPending' WiFiScan.h WiFiScan.cpp
+          grep -n -A5 -B3 'MARAUDER_C5_ZERO' esp32_marauder.ino
 
       - name: Validate C5-Zero safety invariants
         working-directory: marauder
