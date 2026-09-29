@@ -134,23 +134,37 @@ jobs:
                   raise SystemExit(f"Expected one match in {path}: {pattern!r}")
               p.write_text(s2)
 
-          # Avoid brittle line numbers for the two upstream return-type fixes.
+          # Fix upstream methods whose non-SD builds fall through without returning.
           p = Path("SDInterface.cpp")
           s = p.read_text()
-          if "return File();" not in s:
-              m = re.search(r'(^File\s+SDInterface::getFile\s*\(String\s+path\)\s*\{)(.*?)(^\})', s, re.M | re.S)
-              if not m:
-                  raise SystemExit("Could not locate SDInterface::getFile(String path)")
-              s = s[:m.start(3)] + "  return File();\\n" + s[m.start(3):]
-              p.write_text(s)
+          old_sd = """File SDInterface::getFile(String path) {
+            if (this->supported) {
+              File file = SD.open(path, FILE_READ);
+
+              //if (file)
+              return file;
+            }
+          }"""
+          new_sd = """File SDInterface::getFile(String path) {
+            if (this->supported) {
+              File file = SD.open(path, FILE_READ);
+
+              //if (file)
+              return file;
+            }
+            return File();
+          }"""
+          if old_sd not in s:
+              raise SystemExit("Could not locate SDInterface::getFile(String path)")
+          p.write_text(s.replace(old_sd, new_sd, 1))
 
           p = Path("WiFiScan.cpp")
           s = p.read_text()
           if "return num_cleared;" not in s:
-              m = re.search(r'(^int\s+WiFiScan::clearList\s*\(uint8_t\s+list_type\)\s*\{)(.*?)(^\})', s, re.M | re.S)
+              m = re.search(r'(int\s+WiFiScan::clearList\s*\(uint8_t\s+list_type\)\s*\{.*?)(\n\})', s, re.M | re.S)
               if not m:
                   raise SystemExit("Could not locate WiFiScan::clearList(uint8_t list_type)")
-              s = s[:m.start(3)] + "  return num_cleared;\\n" + s[m.start(3):]
+              s = s[:m.start(2)] + "\n  return num_cleared;" + s[m.start(2):]
               p.write_text(s)
 
           # One-definition-rule fixes: declarations in headers, definitions in .cpp.
