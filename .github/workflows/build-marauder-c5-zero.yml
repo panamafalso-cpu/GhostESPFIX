@@ -138,19 +138,19 @@ jobs:
           p = Path("SDInterface.cpp")
           s = p.read_text()
           if "return File();" not in s:
-              m = re.search(r'(^File\\s+SDInterface::getFile\\s*\\([^)]*\\)\\s*\\{.*?)(^\\})', s, re.M | re.S)
+              m = re.search(r'(^File\\s+SDInterface::getFile\\s*\\(String\\s+path\\)\\s*\\{)(.*?)(^\\})', s, re.M | re.S)
               if not m:
-                  raise SystemExit("Could not locate SDInterface::getFile()")
-              s = s[:m.start(2)] + "  return File();\\n" + s[m.start(2):]
+                  raise SystemExit("Could not locate SDInterface::getFile(String path)")
+              s = s[:m.start(3)] + "  return File();\\n" + s[m.start(3):]
               p.write_text(s)
 
           p = Path("WiFiScan.cpp")
           s = p.read_text()
           if "return num_cleared;" not in s:
-              m = re.search(r'(^int\\s+WiFiScan::clearList\\s*\\([^)]*\\)\\s*\\{.*?)(^\\})', s, re.M | re.S)
+              m = re.search(r'(^int\\s+WiFiScan::clearList\\s*\\(uint8_t\\s+list_type\\)\\s*\\{)(.*?)(^\\})', s, re.M | re.S)
               if not m:
-                  raise SystemExit("Could not locate WiFiScan::clearList()")
-              s = s[:m.start(2)] + "  return num_cleared;\\n" + s[m.start(2):]
+                  raise SystemExit("Could not locate WiFiScan::clearList(uint8_t list_type)")
+              s = s[:m.start(3)] + "  return num_cleared;\\n" + s[m.start(3):]
               p.write_text(s)
 
           # One-definition-rule fixes: declarations in headers, definitions in .cpp.
